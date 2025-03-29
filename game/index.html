@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>My first three.js app</title>
+    <style>
+      body { margin: 0; }
+      .camera-position {
+        font-size: 24px;
+        font-weight: bold;
+        font-family: Consolas;
+        color: #fff;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.175.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.175.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="camera-position" style="position: absolute; top: 10px; left: 10px;">
+        <p>Camera Position</p>
+        <p class="camera-position">X: <span id="camPositionX">0</span></p>
+        <p class="camera-position">Y: <span id="camPositionY">0</span></p>
+        <p class="camera-position">Z: <span id="camPositionZ">2</span></p>  
+        <script>
+            setInterval(() => {
+                document.getElementById('camPositionX').textContent = window.camPositionX.toFixed(2);
+                document.getElementById('camPositionY').textContent = window.camPositionY.toFixed(2);
+                document.getElementById('camPositionZ').textContent = window.camPositionZ.toFixed(2);
+            }, 10);
+        </script>
+    </div>    
+  </body>
+  <script>
+    
+    window.upPressed = false;
+    window.downPressed = false;
+    window.leftPressed = false;
+    window.rightPressed = false;
+
+    document.addEventListener('keydown', function(event) {
+        if(event.key === 'w') {
+            window.upPressed = true;
+        }
+        if(event.key === 'a') {
+            window.leftPressed = true;
+        }
+        if(event.key === 's') {
+            window.downPressed = true;
+        }        
+        if(event.key === 'd') {
+            window.rightPressed = true;
+        }
+    });    
+
+    document.addEventListener('keyup', function(event) {
+        if(event.key === 'w') {
+            window.upPressed = false;
+        }
+        if(event.key === 'a') {
+            window.leftPressed = false;
+        }
+        if(event.key === 's') {
+            window.downPressed = false;
+        }
+        if(event.key === 'd') {
+            window.rightPressed = false;
+        }
+    });
+  </script>
+  <script type="module" src="/main.js"></script>
+</html>
