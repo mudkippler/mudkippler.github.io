@@ -11,6 +11,29 @@
         font-family: Consolas;
         color: #fff;
       }
+
+      .chat-box {
+        right: 2px;
+        top: 2px;
+        height: 200px;
+        width: 450px;
+        position: absolute;
+        background-color: white;
+        border: red 2px solid;
+        border-radius: 6px;
+      }
+
+      .chat-input-box {
+        right: 2px;
+        top: 207px;
+        height: 40px;
+        width: 450px;
+        position: absolute;
+        background-color: white;
+        border: red 2px solid;
+        border-radius: 6px;
+      }
+
     </style>
     <script type="importmap">
       {
@@ -28,16 +51,63 @@
         <p class="camera-position">Y: <span id="camPositionY">0</span></p>
         <p class="camera-position">Z: <span id="camPositionZ">2</span></p>  
         <script>
+          window.camPositionX = 0;
+          window.camPositionY = 0;
+          window.camPositionZ = 0;
+
+
             setInterval(() => {
                 document.getElementById('camPositionX').textContent = window.camPositionX.toFixed(2);
                 document.getElementById('camPositionY').textContent = window.camPositionY.toFixed(2);
                 document.getElementById('camPositionZ').textContent = window.camPositionZ.toFixed(2);
             }, 10);
         </script>
-    </div>    
+    </div>
+    <div id="chat-messages" class="chat-box">
+      
+    </div>
+    <input id="chat-input" type="text" class="chat-input-box">
+    </div>
   </body>
   <script>
+    //const socket = new WebSocket('ws://localhost:8080');
+    const socket = new WebSocket('ws://clever-encouragement-production.up.railway.app:8080')
+
+    const chatInput = document.getElementById("chat-input");
+
+    chatInput.addEventListener('keyup', e => {
+      if(e.key === 'Enter'){
+        socket.send(e.target.value);
+        e.target.value = "";
+      }
+    });
     
+    socket.addEventListener('open', function (event) {
+      addMessage('Connected to WebSocket server');
+    });
+
+    // Listen for messages
+    socket.addEventListener('message', function (event) {
+      addMessage(event.data);
+    });
+
+    // Connection closed or error
+    socket.addEventListener('close', function (event) {
+      addMessage('Disconnected from server');
+    });
+    socket.addEventListener('error', function (event) {
+      addMessage('Error: ' + event);
+    });
+
+
+    function addMessage(message) {
+      const messagesDiv = document.getElementById('chat-messages');
+      const messageElement = document.createElement('div');
+      messageElement.textContent = message;
+      messagesDiv.appendChild(messageElement);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
     window.upPressed = false;
     window.downPressed = false;
     window.leftPressed = false;
@@ -72,6 +142,8 @@
             window.rightPressed = false;
         }
     });
+
+    
   </script>
   <script type="module" src="./main.js"></script>
 </html>
