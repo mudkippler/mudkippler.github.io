@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Bootstrap Navbar - Simplified</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        /* --- CSS Variables for Custom Navbar --- */
+        /* Defining variables for main theme colors improves maintainability and readability. */
+        :root {
+            --custom-navbar-border-color: #495057;  /* Typically Bootstrap's $gray-700 */
+            --custom-navbar-bg-color: #f8f9fa;      /* Typically Bootstrap's $gray-100 */
+            --custom-navbar-text-color: #212529;    /* Typically Bootstrap's $gray-900 */
+            --custom-navbar-text-hover-color: #000000;
+            --custom-navbar-active-link-color: #000000;
+            --custom-navbar-active-underline-color: var(--custom-navbar-border-color);
+            --custom-navbar-toggler-border-color: rgba(73, 80, 87, 0.25);
+            /* Note: Toggler icon color is embedded in its SVG data URI directly for simplicity,
+               as dynamic CSS variable injection into data URIs is complex without JS or more advanced SVG techniques. */
+        }
+
+        /* --- Custom Navbar Base --- */
+        .custom-navbar {
+            position: relative; /* Establishes a positioning context for pseudo-elements (like the background image) and absolutely positioned children. */
+            border-bottom: 2px solid var(--custom-navbar-border-color);
+            background-color: var(--custom-navbar-bg-color); /* Fallback background color, also visible if the background image has transparency. */
+            /* Bootstrap utility classes 'pt-1' (padding-top: 0.25rem) and 'pb-0' (padding-bottom: 0) are applied directly in the HTML for conciseness. */
+        }
+
+        /* --- Background Image Styling (using a pseudo-element) --- */
+        /* Using a pseudo-element for the background image avoids an extra empty <div> in the HTML. */
+        .custom-navbar::before {
+            content: "";
+            position: absolute; /* Positioned relative to .custom-navbar. */
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url('./navbar-bg.png'); /* Replace with your actual image path */
+            background-size: cover;
+            background-position: right;
+            opacity: 0.5; /* Semi-transparent background image. */
+            z-index: -1;  /* Places the pseudo-element behind the navbar's content but above its background-color. */
+            /* overflow: hidden; is generally not needed as pseudo-elements are clipped to their parent by default. */
+        }
+
+        /* --- Navbar Content Container --- */
+        .custom-navbar .container {
+            position: relative; /* Ensures its content (logo, links) is stacked above the ::before pseudo-element. */
+            z-index: 1;         /* Explicitly stacks container content above the background image layer. */
+        }
+
+        /* --- App Logo Specific Styling --- */
+        #app-logo {
+            height: 75px; /* Custom height for the logo. This might make the logo taller than the navbar's calculated height. */
+            width: auto;  /* Maintain aspect ratio based on the explicit height. */
+            position: absolute; /* Takes the logo out of the normal document flow. */
+            /* Positioned relative to the .container. Adjust top/left as needed for your design.
+               Example: Aligns to the top-left of the container's content area, respecting navbar's top padding. */
+            top: 0.25rem; /* Corresponds to pt-1 padding of .custom-navbar */
+            left: var(--bs-container-padding-x, 1rem); /* Aligns with Bootstrap container's horizontal padding. */
+            /* If vertical centering within the .container is desired:
+               top: 50%;
+               transform: translateY(-50%);
+            */
+        }
+
+        /* --- General Text Styling for Navbar Elements --- */
+        .custom-navbar .navbar-brand,
+        .custom-navbar .nav-link { /* Targets both the brand and navigation links */
+            color: var(--custom-navbar-text-color);
+        }
+        .custom-navbar .navbar-brand:hover,
+        .custom-navbar .nav-link:hover {
+            color: var(--custom-navbar-text-hover-color); /* Darker text on hover */
+        }
+
+        /* --- Navigation Links --- */
+        /* Specific styling for main navigation links to ensure the active indicator aligns correctly
+           with the navbar's bottom border. This overrides default Bootstrap .nav-link padding. */
+        #nav-main-links .nav-link {
+            padding-bottom: 0; /* Removes bottom padding from nav links. */
+            margin-bottom: 0;  /* Removes bottom margin from nav links. */
+        }
+
+        /* Active Navigation Link Styling */
+        .custom-navbar .nav-link.active {
+            color: var(--custom-navbar-active-link-color); /* Distinct color for the active link. */
+            /* font-weight: bold; is applied via the 'fw-bold' Bootstrap class in the HTML. */
+            position: relative; /* Required for positioning the ::after pseudo-element (the underline). */
+        }
+
+        /* Active Link Indicator Line */
+        /* This pseudo-element creates an underline for the active link.
+           It's positioned to visually merge with and extend the main navbar's bottom border under the active item. */
+        .custom-navbar .nav-link.active::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            /* 'bottom: -2px;' positions the top of this 4px line at the original navbar border's location.
+               Effectively, it covers the 2px navbar border and extends 2px further down. */
+            bottom: -2px;
+            width: 100%;
+            height: 4px;   /* Thickness of the active underline. */
+            background-color: var(--custom-navbar-active-underline-color); /* Same color as the navbar's main bottom border. */
+        }
+
+        /* --- Dropdown Menus --- */
+        .custom-navbar .dropdown-menu {
+            background-color: rgba(255, 255, 255, 0.95); /* Slightly opaque white for better readability over varied backgrounds. */
+            /* Bootstrap's default dropdown z-index is 1000. 1031 is a custom value, potentially
+               to ensure the dropdown appears above other specific page elements. */
+            z-index: 1031;
+        }
+
+        /* Specific styling for the profile image dropdown toggle.
+           Ensures the image itself is the clickable area without extra padding. */
+        .custom-navbar .profile-image-toggle.nav-link { /* Targets the specific toggle more precisely */
+            padding: 0 !important; /* Overrides Bootstrap's default .nav-link padding. Use !important judiciously. */
+        }
+
+        /* --- Buttons & Forms --- */
+        /* Custom styling for the search button, leveraging Bootstrap's CSS variable system for button variants. */
+        .custom-navbar .btn-outline-search {
+            --bs-btn-color: var(--custom-navbar-border-color);
+            --bs-btn-border-color: var(--custom-navbar-border-color);
+            --bs-btn-hover-color: #fff; /* White text on hover when background changes. */
+            --bs-btn-hover-bg: var(--custom-navbar-border-color);
+            --bs-btn-hover-border-color: var(--custom-navbar-border-color);
+            --bs-btn-active-color: #fff;
+            --bs-btn-active-bg: var(--custom-navbar-border-color);
+            --bs-btn-active-border-color: var(--custom-navbar-border-color);
+        }
+
+        /* --- Mobile Navbar Toggler --- */
+        .custom-navbar .navbar-toggler {
+            border-color: var(--custom-navbar-toggler-border-color); /* Custom border color for the toggler button. */
+        }
+        .custom-navbar .navbar-toggler-icon {
+            /* Customizes the color of the "hamburger" icon lines using an embedded SVG.
+               The stroke color within the SVG data URI is explicitly set. */
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%2873, 80, 87, 0.8%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+        }
+
+    </style>
+</head>
+<body>
+
+    <nav class="navbar navbar-expand-lg custom-navbar pt-1 pb-0">
+        <div class="container align-items-center">
+            <img id="app-logo" src="https://placehold.co/200x75/6c757d/ffffff?text=Logo&font=raleway" alt="Company Logo" />
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse align-items-end" id="navbarSupportedContent">
+                <ul id="nav-main-links" class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link active fw-bold" aria-current="page" href="#">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">Products</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">About Us</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#">Contact</a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownServices" role="button" data-bs-toggle="dropdown" aria-expanded="false" data-bs-auto-close="outside">
+                            Services
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="navbarDropdownServices">
+                            <li><a class="dropdown-item" href="#">Service A</a></li>
+                            <li><a class="dropdown-item" href="#">Service B</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#">Special Projects</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdownResources" role="button" data-bs-toggle="dropdown" aria-expanded="false" data-bs-auto-close="outside">
+                            Resources
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="navbarDropdownResources">
+                            <li><a class="dropdown-item" href="#">Blog</a></li>
+                            <li><a class="dropdown-item" href="#">Case Studies</a></li>
+                            <li><a class="dropdown-item" href="#">Downloads</a></li>
+                        </ul>
+                    </li>
+                </ul>
+
+                <div class="d-flex flex-column align-items-end pb-1">
+                    <div class="nav-item dropdown mb-1">
+                        <a class="nav-link dropdown-toggle profile-image-toggle" href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <img src="https://placehold.co/30x30/6c757d/ffffff?text=P&font=raleway" class="rounded-circle" alt="Profile" style="width: 30px; height: 30px; display: block;">
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="profileDropdown">
+                            <li><a class="dropdown-item" href="#">My Profile</a></li>
+                            <li><a class="dropdown-item" href="#">Settings</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#">Logout</a></li>
+                        </ul>
+                    </div>
+
+                    <button class="btn btn-sm btn-outline-secondary mb-1" type="button">More Actions</button>
+
+                    <form class="d-flex" role="search">
+                        <input class="form-control form-control-sm me-2" type="search" placeholder="Search site..." aria-label="Search">
+                        <button class="btn btn-sm btn-outline-search" type="submit">Search</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h1>Page Content Below Navbar</h1>
+        <p>This is some sample content. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+        <p>More content to demonstrate scrolling and dropdown behavior...</p>
+        <div style="height: 1000px;"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+</body>
+</html>
