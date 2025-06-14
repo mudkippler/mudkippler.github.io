@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bootstrap Navbar Examples</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Custom navbar styles */
+        .custom-navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .custom-navbar .navbar-brand {
+            font-weight: bold;
+            font-size: 1.5rem;
+            color: white !important;
+        }
+        
+        .custom-navbar .nav-link {
+            color: rgba(255,255,255,0.9) !important;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin: 0 5px;
+            border-radius: 5px;
+            padding: 8px 15px !important;
+        }
+        
+        .custom-navbar .nav-link:hover {
+            color: white !important;
+            background-color: rgba(255,255,255,0.1);
+            transform: translateY(-2px);
+        }
+        
+        .custom-navbar .nav-link.active {
+            background-color: rgba(255,255,255,0.2);
+            color: white !important;
+        }
+        
+        /* Custom hamburger menu */
+        .custom-toggler {
+            border: none;
+            padding: 4px 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+        }
+        
+        .custom-toggler:focus {
+            box-shadow: none;
+        }
+        
+        .custom-toggler .navbar-toggler-icon {
+            background-image: none;
+            width: 20px;
+            height: 15px;
+            position: relative;
+        }
+        
+        /* Animated hamburger bars */
+        .custom-toggler .navbar-toggler-icon::before,
+        .custom-toggler .navbar-toggler-icon::after,
+        .custom-toggler .navbar-toggler-icon {
+            background-color: white;
+            height: 2px;
+            transition: all 0.3s ease;
+        }
+        
+        .custom-toggler .navbar-toggler-icon::before,
+        .custom-toggler .navbar-toggler-icon::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            left: 0;
+        }
+        
+        .custom-toggler .navbar-toggler-icon::before {
+            top: -6px;
+        }
+        
+        .custom-toggler .navbar-toggler-icon::after {
+            bottom: -6px;
+        }
+        
+        /* Transform hamburger to X when active */
+        .custom-toggler[aria-expanded="true"] .navbar-toggler-icon {
+            background-color: transparent;
+        }
+        
+        .custom-toggler[aria-expanded="true"] .navbar-toggler-icon::before {
+            transform: rotate(45deg);
+            top: 0;
+        }
+        
+        .custom-toggler[aria-expanded="true"] .navbar-toggler-icon::after {
+            transform: rotate(-45deg);
+            bottom: 0;
+        }
+        
+        /* Mobile menu styling */
+        @media (max-width: 991px) {
+            .custom-navbar .navbar-collapse {
+                background: rgba(0,0,0,0.1);
+                border-radius: 10px;
+                margin-top: 10px;
+                padding: 15px;
+            }
+            
+            .custom-navbar .nav-link {
+                text-align: center;
+                margin: 5px 0;
+            }
+        }
+        
+        /* Demonstration content */
+        .demo-section {
+            min-height: 300px;
+            padding: 60px 0;
+        }
+        
+        .code-example {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .navbar-explanation {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Standard Bootstrap Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#"><i class="fas fa-rocket"></i> Standard Nav</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#standardNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="standardNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link active" href="#home">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#services">Services</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#contact">Contact</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Custom Styled Navbar -->
+    <nav class="navbar navbar-expand-lg custom-navbar">
+        <div class="container">
+            <a class="navbar-brand" href="#"><i class="fas fa-magic"></i> Custom Nav</a>
+            <button class="navbar-toggler custom-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#customNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="customNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link active" href="#home">Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#services">Services</a></li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            More
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#portfolio">Portfolio</a></li>
+                            <li><a class="dropdown-item" href="#blog">Blog</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#contact">Contact</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Explanation Section -->
+    <div class="container mt-5">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="mb-4">Understanding Bootstrap Navbars</h1>
+                
+                <div class="navbar-explanation">
+                    <h3><i class="fas fa-info-circle"></i> How Bootstrap Navs Work</h3>
+                    <p><strong>Independent of Grid System:</strong> Bootstrap navs use flexbox layout, which allows them to be responsive without relying on the 12-column grid. This gives them more flexibility for navigation-specific needs.</p>
+                    
+                    <p><strong>Key Components:</strong></p>
+                    <ul>
+                        <li><code>.navbar</code> - Main container using flexbox</li>
+                        <li><code>.navbar-expand-{breakpoint}</code> - Controls when the nav expands</li>
+                        <li><code>.navbar-toggler</code> - The hamburger button</li>
+                        <li><code>.navbar-collapse</code> - The collapsible content area</li>
+                    </ul>
+                </div>
+
+                <div class="code-example">
+                    <h4>Basic Navbar Structure</h4>
+                    <pre><code>&lt;nav class="navbar navbar-expand-lg navbar-dark bg-dark"&gt;
+    &lt;div class="container"&gt;
+        &lt;a class="navbar-brand" href="#"&gt;Brand&lt;/a&gt;
+        
+        &lt;!-- Hamburger button --&gt;
+        &lt;button class="navbar-toggler" type="button" 
+                data-bs-toggle="collapse" 
+                data-bs-target="#navbarNav"&gt;
+            &lt;span class="navbar-toggler-icon"&gt;&lt;/span&gt;
+        &lt;/button&gt;
+        
+        &lt;!-- Collapsible content --&gt;
+        &lt;div class="collapse navbar-collapse" id="navbarNav"&gt;
+            &lt;ul class="navbar-nav ms-auto"&gt;
+                &lt;li class="nav-item"&gt;&lt;a class="nav-link" href="#"&gt;Home&lt;/a&gt;&lt;/li&gt;
+                &lt;li class="nav-item"&gt;&lt;a class="nav-link" href="#"&gt;About&lt;/a&gt;&lt;/li&gt;
+            &lt;/ul&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+&lt;/nav&gt;</code></pre>
+                </div>
+
+                <div class="navbar-explanation">
+                    <h3><i class="fas fa-cogs"></i> Hamburger Menu Mechanics</h3>
+                    <p>The hamburger menu works through Bootstrap's collapse JavaScript component:</p>
+                    <ol>
+                        <li><strong>Trigger:</strong> <code>data-bs-toggle="collapse"</code> on the button</li>
+                        <li><strong>Target:</strong> <code>data-bs-target="#navbarNav"</code> points to the collapsible element</li>
+                        <li><strong>State:</strong> Bootstrap adds/removes the <code>show</code> class</li>
+                        <li><strong>Animation:</strong> CSS transitions handle the smooth expand/collapse</li>
+                    </ol>
+                </div>
+
+                <div class="code-example">
+                    <h4>Customization Examples</h4>
+                    <p><strong>1. Custom Colors and Gradients:</strong></p>
+                    <pre><code>.custom-navbar {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}</code></pre>
+
+                    <p><strong>2. Animated Hamburger Menu:</strong></p>
+                    <pre><code>/* Transform hamburger to X */
+.custom-toggler[aria-expanded="true"] .navbar-toggler-icon::before {
+    transform: rotate(45deg);
+    top: 0;
+}</code></pre>
+
+                    <p><strong>3. Responsive Behavior:</strong></p>
+                    <pre><code>/* Different breakpoints */
+.navbar-expand-sm  /* Expands at small screens and up */
+.navbar-expand-md  /* Expands at medium screens and up */
+.navbar-expand-lg  /* Expands at large screens and up */
+.navbar-expand-xl  /* Expands at extra large screens and up */</code></pre>
+                </div>
+
+                <div class="demo-section">
+                    <h3>Try It Out</h3>
+                    <p>Resize your browser window or use mobile view to see how the navbars above respond to different screen sizes. Notice how the hamburger menu appears and the navigation items collapse into a mobile-friendly menu.</p>
+                    
+                    <div class="alert alert-info">
+                        <strong>Pro Tip:</strong> The navbar works outside the grid system because it's designed to be a full-width component that adapts to any container size. You can still use <code>.container</code> or <code>.container-fluid</code> inside the navbar to control the content width.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

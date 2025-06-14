@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bootstrap Layout A - Faceted Sidebar</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.1/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        .search-sidebar {
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+        
+        .results-area {
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+        
+        .result-card {
+            transition: all 0.2s ease;
+            border: 1px solid #dee2e6;
+        }
+        
+        .result-card:hover {
+            border-color: #0d6efd;
+            box-shadow: 0 4px 12px rgba(13, 110, 253, 0.15);
+            transform: translateY(-2px);
+        }
+        
+        .quick-filter-pill {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .quick-filter-pill:hover {
+            background-color: #0d6efd !important;
+            color: white !important;
+        }
+        
+        .accordion-flush .accordion-item {
+            border: none;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .accordion-button {
+            padding: 1rem 0.75rem;
+            background-color: transparent;
+            border: none;
+            box-shadow: none;
+        }
+        
+        .accordion-button:not(.collapsed) {
+            background-color: transparent;
+            color: #0d6efd;
+        }
+        
+        .accordion-button:focus {
+            border-color: transparent;
+            box-shadow: none;
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        
+        .status-active { background-color: #198754; }
+        .status-inactive { background-color: #6c757d; }
+        .status-pending { background-color: #ffc107; }
+        
+        .filter-count {
+            color: #6c757d;
+            font-size: 0.875rem;
+        }
+        
+        .advanced-search-panel {
+            background-color: #f8f9fa;
+            border-left: 1px solid #dee2e6;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            position: fixed;
+            top: 0;
+            right: 0;
+            height: 100vh;
+            width: 400px;
+            z-index: 1050;
+            overflow-y: auto;
+        }
+        
+        .advanced-search-panel.show {
+            transform: translateX(0);
+        }
+        
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1040;
+            display: none;
+        }
+        
+        .overlay.show {
+            display: block;
+        }
+        
+        @media (max-width: 768px) {
+            .search-sidebar {
+                height: auto;
+                max-height: 400px;
+            }
+            
+            .results-area {
+                height: auto;
+            }
+            
+            .advanced-search-panel {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <span class="navbar-brand">Search Interface - Layout A</span>
+            <div class="d-flex">
+                <a href="#" onclick="window.open('about:blank').location.href = window.location.href.replace('bootstrap_layout_a', 'bootstrap_layout_b')" class="btn btn-outline-light">
+                    <i class="bi bi-layout-sidebar"></i> View Layout B
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid p-0">
+        <div class="row g-0">
+            <!-- Sidebar -->
+            <div class="col-lg-3 col-md-4">
+                <div class="search-sidebar p-3">
+                    <!-- Quick Search -->
+                    <div class="mb-3">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" placeholder="Quick search names, emails...">
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Filters -->
+                    <div class="mb-3">
+                        <h6 class="fw-bold text-muted mb-2">QUICK FILTERS</h6>
+                        <div class="d-flex flex-wrap gap-1">
+                            <span class="badge bg-secondary quick-filter-pill">Recently Active</span>
+                            <span class="badge bg-secondary quick-filter-pill">New This Week</span>
+                            <span class="badge bg-secondary quick-filter-pill">VIP Customers</span>
+                            <span class="badge bg-secondary quick-filter-pill">Incomplete Profiles</span>
+                        </div>
+                    </div>
+
+                    <!-- Accordion Filters -->
+                    <div class="accordion accordion-flush" id="filterAccordion">
+                        <!-- Status Filter -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#statusFilter">
+                                    <strong>Status</strong>
+                                </button>
+                            </h2>
+                            <div id="statusFilter" class="accordion-collapse collapse show" data-bs-parent="#filterAccordion">
+                                <div class="accordion-body py-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="activeStatus" checked>
+                                        <label class="form-check-label d-flex justify-content-between" for="activeStatus">
+                                            <span><span class="status-indicator status-active"></span>Active</span>
+                                            <span class="filter-count">1,247</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="inactiveStatus">
+                                        <label class="form-check-label d-flex justify-content-between" for="inactiveStatus">
+                                            <span><span class="status-indicator status-inactive"></span>Inactive</span>
+                                            <span class="filter-count">89</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="pendingStatus">
+                                        <label class="form-check-label d-flex justify-content-between" for="pendingStatus">
+                                            <span><span class="status-indicator status-pending"></span>Pending</span>
+                                            <span class="filter-count">156</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Department Filter -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#departmentFilter">
+                                    <strong>Department</strong>
+                                </button>
+                            </h2>
+                            <div id="departmentFilter" class="accordion-collapse collapse" data-bs-parent="#filterAccordion">
+                                <div class="accordion-body py-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sales">
+                                        <label class="form-check-label d-flex justify-content-between" for="sales">
+                                            <span>Sales</span>
+                                            <span class="filter-count">342</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="marketing">
+                                        <label class="form-check-label d-flex justify-content-between" for="marketing">
+                                            <span>Marketing</span>
+                                            <span class="filter-count">198</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="engineering">
+                                        <label class="form-check-label d-flex justify-content-between" for="engineering">
+                                            <span>Engineering</span>
+                                            <span class="filter-count">445</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="hr">
+                                        <label class="form-check-label d-flex justify-content-between" for="hr">
+                                            <span>Human Resources</span>
+                                            <span class="filter-count">67</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Location Filter -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#locationFilter">
+                                    <strong>Location</strong>
+                                </button>
+                            </h2>
+                            <div id="locationFilter" class="accordion-collapse collapse" data-bs-parent="#filterAccordion">
+                                <div class="accordion-body py-2">
+                                    <select class="form-select form-select-sm mb-2">
+                                        <option>All Locations</option>
+                                        <option>New York, NY</option>
+                                        <option>San Francisco, CA</option>
+                                        <option>Chicago, IL</option>
+                                        <option>Remote</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Date Range Filter -->
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#dateFilter">
+                                    <strong>Date Range</strong>
+                                </button>
+                            </h2>
+                            <div id="dateFilter" class="accordion-collapse collapse" data-bs-parent="#filterAccordion">
+                                <div class="accordion-body py-2">
+                                    <div class="mb-2">
+                                        <label class="form-label small">Created From</label>
+                                        <input type="date" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small">Created To</label>
+                                        <input type="date" class="form-control form-control-sm">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Search Button -->
+                    <div class="mt-3 d-grid">
+                        <button class="btn btn-outline-primary" onclick="showAdvancedSearch()">
+                            <i class="bi bi-sliders"></i> Advanced Search
+                            <span class="badge bg-primary ms-2">35+ Fields</span>
+                        </button>
+                    </div>
+
+                    <!-- Clear Filters -->
+                    <div class="mt-2 d-grid">
+                        <button class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-x-circle"></i> Clear All Filters
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Area -->
+            <div class="col-lg-9 col-md-8">
+                <div class="results-area">
+                    <!-- Results Header -->
+                    <div class="bg-white border-bottom p-3">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <h5 class="mb-1">Search Results</h5>
+                                <small class="text-muted results-info">Showing 1,247 of 1,492 total records • Updated 2 min ago</small>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="d-flex justify-content-end gap-2">
+                                    <div class="btn-group" role="group">
+                                        <input type="radio" class="btn-check" name="viewType" id="cardView" checked>
+                                        <label class="btn btn-outline-secondary" for="cardView">
+                                            <i class="bi bi-grid-3x3-gap"></i> Cards
+                                        </label>
+                                        <input type="radio" class="btn-check" name="viewType" id="tableView">
+                                        <label class="btn btn-outline-secondary" for="tableView">
+                                            <i class="bi bi-table"></i> Table
+                                        </label>
+                                    </div>
+                                    <div class="dropdown">
+                                        <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                            <i class="bi bi-gear"></i> Columns
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end" style="min-width: 250px;">
+                                            <li><h6 class="dropdown-header">Visible Columns</h6></li>
+                                            <li><label class="dropdown-item"><input type="checkbox" class="me-2" checked> Name</label></li>
+                                            <li><label class="dropdown-item"><input type="checkbox" class="me-2" checked> Email</label></li>
+                                            <li><label class="dropdown-item"><input type="checkbox" class="me-2" checked> Company</label></li>
+                                            <li><label class="dropdown-item"><input type="checkbox" class="me-2"> Phone</label></li>
+                                            <li><label class="dropdown-item"><input type="checkbox" class="me-2"> Department</label></li>
+                                            <li><label class="dropdown-item"><input type="checkbox" class="me-2"> Location</label></li>
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li><a class="dropdown-item small" href="#"><i class="bi bi-arrow-clockwise me-1"></i> Reset to Defaults</a></li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Results Content -->
+                    <div class="p-3">
+                        <div class="row g-3" id="resultsGrid">
+                            <div class="col-xl-4 col-lg-6">
+                                <div class="card result-card h-100">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0">Sarah Johnson</h6>
+                                            <span class="status-indicator status-active"></span>
+                                        </div>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-envelope me-1"></i> sarah.j@techcorp.com
+                                        </p>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-building me-1"></i> TechCorp Inc
+                                        </p>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="bi bi-person-badge me-1"></i> Marketing Manager
+                                        </p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted">Last activity: 2 days ago</small>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary"><i class="bi bi-eye"></i></button>
+                                                <button class="btn btn-outline-secondary"><i class="bi bi-pencil"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-xl-4 col-lg-6">
+                                <div class="card result-card h-100">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0">Michael Chen</h6>
+                                            <span class="status-indicator status-active"></span>
+                                        </div>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-envelope me-1"></i> m.chen@startupxyz.io
+                                        </p>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-building me-1"></i> StartupXYZ
+                                        </p>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="bi bi-person-badge me-1"></i> Software Engineer
+                                        </p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted">Last activity: 1 week ago</small>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary"><i class="bi bi-eye"></i></button>
+                                                <button class="btn btn-outline-secondary"><i class="bi bi-pencil"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-xl-4 col-lg-6">
+                                <div class="card result-card h-100">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0">Emma Rodriguez</h6>
+                                            <span class="status-indicator status-pending"></span>
+                                        </div>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-envelope me-1"></i> emma.r@bigcorp.net
+                                        </p>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-building me-1"></i> BigCorp Ltd
+                                        </p>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="bi bi-person-badge me-1"></i> Project Manager
+                                        </p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted">Last activity: 3 hours ago</small>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary"><i class="bi bi-eye"></i></button>
+                                                <button class="btn btn-outline-secondary"><i class="bi bi-pencil"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-xl-4 col-lg-6">
+                                <div class="card result-card h-100">
+                                    <div class="card-body">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="card-title mb-0">David Kim</h6>
+                                            <span class="status-indicator status-active"></span>
+                                        </div>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-envelope me-1"></i> d.kim@designstudio.co
+                                        </p>
+                                        <p class="card-text small text-muted mb-1">
+                                            <i class="bi bi-building me-1"></i> Design Studio
+                                        </p>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="bi bi-person-badge me-1"></i> Senior UX Designer
+                                        </p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <small class="text-muted">Last activity: 4 hours ago</small>
+                                            <div class="btn-group btn-group-sm">
+                                                <button class="btn btn-outline-primary"><i class="bi bi-eye"></i></button>
+                                                <button class="btn btn-outline-secondary"><i class="bi bi-pencil"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pagination -->
+                        <nav class="mt-4">
+                            <ul class="pagination justify-content-center">
+                                <li class="page-item disabled"><a class="page-link" href="#" tabindex="-1">Previous</a></li>
+                                <li class="page-item active"><a class="page-link" href="#">1</a></li>
+                                <li class="page-item"><a class="page-link" href="#">2</a></li>
+                                <li class="page-item"><a class="page-link" href="#">3</a></li>
+                                <li class="page-item"><a class="page-link" href="#">Next</a></li>
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Search Panel -->
+    <div class="overlay" id="overlay" onclick="hideAdvancedSearch()"></div>
+    <div class="advanced-search-panel" id="advancedPanel">
+        <div class="p-3 border-bottom">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Advanced Search</h5>
+                <button type="button" class="btn-close" onclick="hideAdvancedSearch()"></button>
+            </div>
+        </div>
+        
+        <div class="p-3">
+            <!-- Search Builder -->
+            <div class="mb-4">
+                <h6 class="fw-bold mb-3">Search Rules</h6>
+                
+                <div class="search-rule mb-3 p-3 bg-light rounded">
+                    <div class="row g-2 mb-2">
+                        <div class="col-4">
+                            <select class="form-select form-select-sm">
+                                <option>First Name</option>
+                                <option>Last Name</option>
+                                <option>Email</option>
+                                <option>Phone</option>
+                                <option>Company</option>
+                                <option>Job Title</option>
+                                <option>Department</option>
+                                <option>Location</option>
+                                <option>Status</option>
+                                <option>Created Date</option>
+                            </select>
+                        </div>
+                        <div class="col-3">
+                            <select class="form-select form-select-sm">
+                                <option>contains</option>
+                                <option>equals</option>
+                                <option>starts with</option>
+                                <option>ends with</option>
+                                <option>is empty</option>
+                                <option>is not empty</option>
+                            </select>
+                        </div>
+                        <div class="col-4">
+                            <input type="text" class="form-control form-control-sm" placeholder="Enter value">
+                        </div>
+                        <div class="col-1">
+                            <button class="btn btn-outline-danger btn-sm w-100">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-plus"></i> Add Rule
+                </button>
+            </div>
+
+            <!-- Additional Fields -->
+            <div class="accordion accordion-flush" id="advancedAccordion">
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#personalFields">
+                            Personal Information
+                        </button>
+                    </h2>
+                    <div id="personalFields" class="accordion-collapse collapse" data-bs-parent="#advancedAccordion">
+                        <div class="accordion-body">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Age Range</label>
+                                    <select class="form-select form-select-sm">
+                                        <option>Any</option>
+                                        <option>18-25</option>
+                                        <option>26-35</option>
+                                        <option>36-50</option>
+                                        <option>50+</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Gender</label>
+                                    <select class="form-select form-select-sm">
+                                        <option>Any</option>
+                                        <option>Male</option>
+                                        <option>Female</option>
+                                        <option>Other</option>
+                                        <option>Prefer not to say</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#contactFields">
+                            Contact Information
+                        </button>
+                    </h2>
+                    <div id="contactFields" class="accordion-collapse collapse" data-bs-parent="#advancedAccordion">
+                        <div class="accordion-body">
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Phone Type</label>
+                                    <select class="form-select form-select-sm">
+                                        <option>Any</option>
+                                        <option>Mobile</option>
+                                        <option>Work</option>
+                                        <option>Home</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Email Domain</label>
+                                    <input type="text" class="form-control form-control-sm" placeholder="e.g., gmail.com">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="mt-4 d-grid gap-2">
+                <button class="btn btn-primary">Apply Filters</button>
+                <button class="btn btn-outline-secondary">Save Search</button>
+                <button class="btn btn-outline-danger">Clear All</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function showAdvancedSearch() {
+            document.getElementById('overlay').classList.add('show');
+            document.getElementById('advancedPanel').classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function hideAdvancedSearch() {
+            document.getElementById('overlay').classList.remove('show');
+            document.getElementById('advancedPanel').classList.remove('show');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Quick filter pill interactions
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('quick-filter-pill')) {
+                e.target.classList.toggle('bg-primary');
+                e.target.classList.toggle('bg-secondary');
+            }
+        });
+
+        // Escape key to close advanced search
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                hideAdvancedSearch();
+            }
+        });
+
+        // Filter count updates
+        document.addEventListener('change', function(e) {
+            if (e.target.type === 'checkbox' && e.target.closest('.accordion-body')) {
+                updateResultCounts();
+            }
+        });
+
+        function updateResultCounts() {
+            const resultInfo = document.querySelector('.results-info');
+            if (resultInfo) {
+                const activeFilters = document.querySelectorAll('input[type="checkbox"]:checked').length;
+                const baseCount = 1492;
+                const filteredCount = Math.max(baseCount - (activeFilters * 150), 50);
+                resultInfo.innerHTML = `Showing ${filteredCount.toLocaleString()} of ${baseCount.toLocaleString()} total records • Updated just now`;
+            }
+        }
+    </script>
+</body>
+</html>

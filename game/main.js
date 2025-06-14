@@ -1,8 +1,58 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+let stuart = undefined;
+let stuartAnimations = undefined;
 
 const scene = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer();
+const loader = new GLTFLoader();
+const clock = new THREE.Clock();
+let mixer = undefined;
+let action = undefined;
+
+loader.load( './models/knight/knight_backwards.glb', (gltf) => {
+    stuart = gltf.scene;
+    stuart.scale.set(0.1,0.1,0.1);
+    scene.add( stuart );
+
+    stuartAnimations = gltf.animations;
+
+    // console.log(gltf.animations)
+
+    // mixer = new THREE.AnimationMixer( stuart );
+
+    // const action = mixer.clipAction( stuartAnimations[0] ); // play the first animation
+    // action.play();
+
+     // Create an animation mixer
+     mixer = new THREE.AnimationMixer(stuart);
+            
+     // Create an array to store all animation actions
+     const animations = gltf.animations;
+     
+     // Get the first animation and play it
+     // You can change the index to play different animations
+     action = mixer.clipAction(animations[0]);
+     
+     // Optional animation settings
+     action.setLoop(THREE.LoopRepeat); // THREE.LoopOnce, THREE.LoopRepeat, THREE.LoopPingPong
+     action.clampWhenFinished = true; // Keep the final pose when animation finishes
+     action.timeScale = 1; // Speed up or slow down the animation
+     
+     // Play the animation
+     //action.play();     
+     
+     // Log available animations for debugging
+     console.log('Available animations:', gltf.animations.map(anim => anim.name));
+    
+  
+  }, undefined, function ( error ) {
+  
+    console.error( error );
+  
+  } );
 
 //cube camera
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -48,18 +98,37 @@ scene.add( ambientLight );
 scene.add( cube );
 
 function animate() {
+    const delta = clock.getDelta();
+    if(mixer) {
+        //console.log(mixer);
+        mixer.update( delta );
+    }
+
+    if(!window.upPressed) {
+        if(action){
+            action.stop();
+        }
+    }
 
     if(window.upPressed) {
+        debounce(function(){
+            addMessage('moving up');
+        }, 100);
         cube.position.z -= 0.01;
+        stuart.position.z -= 0.01;
+        action.play();        
     }
     if(window.downPressed) {
         cube.position.z += 0.01;
+        stuart.position.z += 0.01;
     }
     if(window.leftPressed) {
         cube.position.x -= 0.01;
+        stuart.position.x -= 0.01;
     }
     if(window.rightPressed) {
         cube.position.x += 0.01;
+        stuart.position.x += 0.01;
     }    
 
     controls.update();
@@ -72,3 +141,14 @@ function animate() {
 }
 
 renderer.setAnimationLoop( animate );
+
+
+function debounce(callback, delay) {
+    let timer
+    return function() {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        callback();
+      }, delay)
+    }
+  }
