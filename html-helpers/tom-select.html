@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+
+<hr>
+<pre>
+    // TomSelectExtensions.cs
+</pre>
+<hr>
+<pre>
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Web.Mvc;
+using System.Web.Mvc.Html;
+
+namespace YourApp.Extensions
+{
+    public static class TomSelectExtensions
+    {
+        public static MvcHtmlString FoodTypesDropdownFor&lt;TModel, TProperty&gt;(
+            this HtmlHelper&lt;TModel&gt; htmlHelper,
+            Expression&lt;Func&lt;TModel, TProperty&gt;&gt; expression,
+            IEnumerable&lt;FoodType&gt; foodTypes,
+            object htmlAttributes = null)
+        {
+            var name = ExpressionHelper.GetExpressionText(expression);
+            var fullName = htmlHelper.ViewContext.ViewData.TemplateInfo.GetFullHtmlFieldName(name);
+            var metadata = ModelMetadata.FromLambdaExpression(expression, htmlHelper.ViewData);
+            var value = metadata.Model;
+            
+            var items = foodTypes.Select(ft =&gt; new SelectListItem 
+            { 
+                Value = ft.Id.ToString(), 
+                Text = ft.Name 
+            });
+            
+            var viewData = new ViewDataDictionary(htmlHelper.ViewData)
+            {
+                ["Name"] = fullName,
+                ["SelectedValue"] = value,
+                ["Items"] = items,
+                ["HtmlAttributes"] = htmlAttributes
+            };
+            
+            return htmlHelper.Partial("_FoodTypesDropdown", viewData);
+        }
+
+        public static MvcHtmlString UsersDropdownFor&lt;TModel, TProperty&gt;(
+            this HtmlHelper&lt;TModel&gt; htmlHelper,
+            Expression&lt;Func&lt;TModel, TProperty&gt;&gt; expression,
+            IEnumerable&lt;User&gt; users,
+            object htmlAttributes = null)
+        {
+            var name = ExpressionHelper.GetExpressionText(expression);
+            var fullName = htmlHelper.ViewContext.ViewData.TemplateInfo.GetFullHtmlFieldName(name);
+            var metadata = ModelMetadata.FromLambdaExpression(expression, htmlHelper.ViewData);
+            var value = metadata.Model;
+            
+            var items = users.Select(u =&gt; new SelectListItem 
+            { 
+                Value = u.Id.ToString(), 
+                Text = $"{u.FirstName} {u.LastName}" 
+            });
+            
+            var viewData = new ViewDataDictionary(htmlHelper.ViewData)
+            {
+                ["Name"] = fullName,
+                ["SelectedValue"] = value,
+                ["Items"] = items,
+                ["HtmlAttributes"] = htmlAttributes
+            };
+            
+            return htmlHelper.Partial("_UsersDropdown", viewData);
+        }
+
+        public static MvcHtmlString TagsDropdownFor&lt;TModel, TProperty&gt;(
+            this HtmlHelper&lt;TModel&gt; htmlHelper,
+            Expression&lt;Func&lt;TModel, TProperty&gt;&gt; expression,
+            IEnumerable&lt;Tag&gt; tags,
+            object htmlAttributes = null)
+        {
+            var name = ExpressionHelper.GetExpressionText(expression);
+            var fullName = htmlHelper.ViewContext.ViewData.TemplateInfo.GetFullHtmlFieldName(name);
+            var metadata = ModelMetadata.FromLambdaExpression(expression, htmlHelper.ViewData);
+            var value = metadata.Model;
+            
+            var items = tags.Select(t =&gt; new SelectListItem 
+            { 
+                Value = t.Id.ToString(), 
+                Text = t.Name 
+            });
+            
+            var viewData = new ViewDataDictionary(htmlHelper.ViewData)
+            {
+                ["Name"] = fullName,
+                ["SelectedValue"] = value,
+                ["Items"] = items,
+                ["HtmlAttributes"] = htmlAttributes
+            };
+            
+            return htmlHelper.Partial("_TagsDropdown", viewData);
+        }
+    }
+}</pre>
+
+<hr>
+<pre>
+// _FoodTypesDropdown.cshtml
+</pre>
+<hr>
+<pre>
+
+@{
+    var dropdownId = "food-types-" + Guid.NewGuid().ToString("N")[..8];
+    var name = ViewBag.Name;
+    var selectedValue = ViewBag.SelectedValue;
+    var items = (IEnumerable&lt;SelectListItem&gt;)ViewBag.Items;
+    var htmlAttributes = ViewBag.HtmlAttributes;
+    
+    // Convert anonymous object to dictionary for easier handling
+    var attributes = htmlAttributes != null 
+        ? HtmlHelper.AnonymousObjectToHtmlAttributes(htmlAttributes)
+        : new Dictionary&lt;string, object&gt;();
+    
+    // Ensure we have a class attribute, merging with any provided
+    var cssClass = attributes.ContainsKey("class") 
+        ? "form-control " + attributes["class"]
+        : "form-control";
+    attributes["class"] = cssClass;
+}
+
+&lt;select id="@dropdownId" name="@name" @Html.Raw(string.Join(" ", attributes.Select(a => $"{a.Key}=\"{Html.Encode(a.Value)}\"")))&gt;
+    @foreach(var item in items)
+    {
+        &lt;option value="@item.Value" @(item.Value == selectedValue?.ToString() ? "selected" : "")&gt;
+            @item.Text
+        &lt;/option&gt;
+    }
+&lt;/select&gt;
+
+&lt;script&gt;
+(function() {
+    var dropdown = new TomSelect('#@dropdownId', {
+        plugins: ['clear_button'],
+        searchField: ['text'],
+        placeholder: 'Select a food type...',
+        onChange: function(value) {
+            // Handle change - call global handler if available
+            if (window.foodTypeHandlers && window.foodTypeHandlers.onChange) {
+                window.foodTypeHandlers.onChange(value, '@dropdownId');
+            }
+        }
+    });
+})();
+&lt;/script&gt;
+</pre>
+
+<hr>
+<pre>
+    // _UsersDropdown.cshtml
+</pre>
+<hr>
+<pre>
+// _UsersDropdown.cshtml
+@{
+    var dropdownId = "users-" + Guid.NewGuid().ToString("N")[..8];
+    var name = ViewBag.Name;
+    var selectedValue = ViewBag.SelectedValue;
+    var items = (IEnumerable&lt;SelectListItem&gt;)ViewBag.Items;
+    var htmlAttributes = ViewBag.HtmlAttributes;
+    
+    // Convert anonymous object to dictionary for easier handling
+    var attributes = htmlAttributes != null 
+        ? HtmlHelper.AnonymousObjectToHtmlAttributes(htmlAttributes)
+        : new Dictionary&lt;string, object&gt;();
+    
+    // Ensure we have a class attribute, merging with any provided
+    var cssClass = attributes.ContainsKey("class") 
+        ? "form-control " + attributes["class"]
+        : "form-control";
+    attributes["class"] = cssClass;
+}
+
+&lt;select id="@dropdownId" name="@name" @Html.Raw(string.Join(" ", attributes.Select(a =>; $"{a.Key}=\"{Html.Encode(a.Value)}\"")))&gt;
+    @foreach(var item in items)
+    {
+        &lt;option value="@item.Value" @(item.Value == selectedValue?.ToString() ? "selected" : "")&gt;
+            @item.Text
+        &lt;/option&gt;
+    }
+&lt;/select&gt;
+&lt;script&gt;
+(function() {
+    var dropdown = new TomSelect('#@dropdownId', {
+        plugins: ['clear_button'],
+        searchField: ['text'],
+        placeholder: 'Type to search users...',
+        preload: false,
+        load: function(query, callback) {
+            if (!query.length) return callback();
+            
+            // Make AJAX call to search users
+            $.ajax({
+                url: '@Url.Action("SearchUsers", "Users")',
+                type: 'GET',
+                dataType: 'json',
+                data: { q: query },
+                success: function(data) {
+                    callback(data.map(function(user) {
+                        return {
+                            value: user.id,
+                            text: user.firstName + ' ' + user.lastName
+                        };
+                    }));
+                },
+                error: function() {
+                    callback();
+                }
+            });
+        },
+        onChange: function(value) {
+            // Handle change - call global handler if available
+            if (window.userHandlers && window.userHandlers.onChange) {
+                window.userHandlers.onChange(value, '@dropdownId');
+            }
+        }
+    });
+})();
+</script>
+</pre>
+
+<hr>
+
+<pre>
+    // _TagsDropdown.cshtml
+</pre>
+<hr>
+<pre>
+@{
+    var dropdownId = "tags-" + Guid.NewGuid().ToString("N")[..8];
+    var name = ViewBag.Name;
+    var selectedValue = ViewBag.SelectedValue;
+    var items = (IEnumerable&lt;SelectListItem&gt;)ViewBag.Items;
+    var htmlAttributes = ViewBag.HtmlAttributes;
+    
+    // Convert anonymous object to dictionary for easier handling
+    var attributes = htmlAttributes != null 
+        ? HtmlHelper.AnonymousObjectToHtmlAttributes(htmlAttributes)
+        : new Dictionary&lt;string, object&gt;();
+    
+    // Ensure we have a class attribute, merging with any provided
+    var cssClass = attributes.ContainsKey("class") 
+        ? "form-control " + attributes["class"]
+        : "form-control";
+    attributes["class"] = cssClass;
+    
+    // Handle multi-select values (could be array or comma-separated string)
+    var selectedValues = new List&lt;string&gt;();
+    if (selectedValue != null)
+    {
+        if (selectedValue is IEnumerable&lt;object&gt; enumerable)
+        {
+            selectedValues = enumerable.Select(v => v.ToString()).ToList();
+        }
+        else
+        {
+            selectedValues = selectedValue.ToString().Split(',').Select(v => v.Trim()).ToList();
+        }
+    }
+}
+
+&lt;select id="@dropdownId" name="@name" multiple @Html.Raw(string.Join(" ", attributes.Select(a => $"{a.Key}=\"{Html.Encode(a.Value)}\"")))&gt;
+    @foreach(var item in items)
+    {
+        &lt;option value="@item.Value" @(selectedValues.Contains(item.Value) ? "selected" : "")&gt;
+            @item.Text
+        &lt;/option&gt;
+    }
+&lt;/select&gt;
+
+&lt;script&gt;
+(function() {
+    var dropdown = new TomSelect('#@dropdownId', {
+        plugins: ['remove_button'],
+        searchField: ['text'],
+        placeholder: 'Select tags...',
+        maxItems: null, // Allow unlimited selections
+        create: false,  // Don't allow creating new tags
+        onChange: function(values) {
+            // Handle change - call global handler if available
+            if (window.tagHandlers && window.tagHandlers.onChange) {
+                window.tagHandlers.onChange(values, '@dropdownId');
+            }
+        },
+        onItemAdd: function(value, item) {
+            // Handle item add - call global handler if available
+            if (window.tagHandlers && window.tagHandlers.onItemAdd) {
+                window.tagHandlers.onItemAdd(value, item, '@dropdownId');
+            }
+        },
+        onItemRemove: function(value) {
+            // Handle item remove - call global handler if available
+            if (window.tagHandlers && window.tagHandlers.onItemRemove) {
+                window.tagHandlers.onItemRemove(value, '@dropdownId');
+            }
+        }
+    });
+})();
+&lt;/script&gt;
+</pre>
+
+<hr>
+
+<pre>
+    // usage examples
+</pre>
+<hr>
+<pre>
+
+@* Usage Examples for TomSelect Helpers *@
+
+@* 1. Basic Food Types Dropdown *@
+@Html.FoodTypesDropdownFor(m => m.SelectedFoodTypeId, Model.FoodTypes)
+
+@* 2. Food Types with Custom CSS Class *@
+@Html.FoodTypesDropdownFor(m => m.SelectedFoodTypeId, Model.FoodTypes, new { @class = "required-field" })
+
+@* 3. Food Types with Data Attributes *@
+@Html.FoodTypesDropdownFor(m => m.SelectedFoodTypeId, Model.FoodTypes, new { 
+    @class = "validation-required",
+    data_validation = "required",
+    data_error_message = "Please select a food type"
+})
+
+@* 4. Users Dropdown with Remote Search *@
+@Html.UsersDropdownFor(m => m.AssignedUserId, Model.Users)
+
+@* 5. Users Dropdown with Custom Attributes *@
+@Html.UsersDropdownFor(m => m.AssignedUserId, Model.Users, new { 
+    disabled = Model.IsReadOnly ? "disabled" : null,
+    title = "Select the user to assign this task to"
+})
+
+@* 6. Multi-select Tags Dropdown *@
+@Html.TagsDropdownFor(m => m.SelectedTagIds, Model.AvailableTags)
+
+@* 7. Tags with Custom Class *@
+@Html.TagsDropdownFor(m => m.SelectedTagIds, Model.AvailableTags, new { @class = "tags-input" })
+
+@* JavaScript Event Handlers (optional) *@
+&lt;script&gt;
+// Global event handlers for custom behavior
+window.foodTypeHandlers = {
+    onChange: function(value, dropdownId) {
+        console.log('Food type changed:', value, 'in dropdown:', dropdownId);
+        // Custom logic here
+    }
+};
+
+window.userHandlers = {
+    onChange: function(value, dropdownId) {
+        console.log('User changed:', value, 'in dropdown:', dropdownId);
+        // Custom logic here
+    }
+};
+
+window.tagHandlers = {
+    onChange: function(values, dropdownId) {
+        console.log('Tags changed:', values, 'in dropdown:', dropdownId);
+    },
+    onItemAdd: function(value, item, dropdownId) {
+        console.log('Tag added:', value, 'in dropdown:', dropdownId);
+    },
+    onItemRemove: function(value, dropdownId) {
+        console.log('Tag removed:', value, 'in dropdown:', dropdownId);
+    }
+};
+&lt;/script&gt;
+
+@* Controller Action Example for Users Remote Search *@
+@* 
+public JsonResult SearchUsers(string q)
+{
+    var users = _userService.SearchUsers(q)
+        .Select(u => new { 
+            id = u.Id, 
+            firstName = u.FirstName, 
+            lastName = u.LastName 
+        })
+        .Take(10)
+        .ToList();
+    
+    return Json(users, JsonRequestBehavior.AllowGet);
+}
+*@
+</pre>
+
+</body>
+</html>
