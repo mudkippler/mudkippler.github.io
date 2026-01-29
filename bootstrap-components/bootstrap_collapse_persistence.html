@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Bootstrap collapse persistence example</title>
+    <!-- Required meta tags -->
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+
+    <!-- Bootstrap CSS v5.2.1 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous" />
+</head>
+
+<body>
+
+    <header>
+        <!-- place navbar here -->
+    </header>
+    <main>
+        <div class="container">
+            <h1>Accordion State Persistence Example</h1>
+            <div class="row">
+                <div class="col">
+                    <p>
+                        This example demonstrates how to persist the state of multiple
+                        Bootstrap accordions across page reloads using sessionStorage.
+                    </p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col">
+                    <div data-persist-accordion="example-record-id">
+                        <div id="people-tab" class="accordion mb-2">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                        data-bs-target="#peopleSection">
+                                        People tab
+                                    </button>
+                                </h2>
+                                <div id="peopleSection" class="accordion-collapse collapse">
+                                    <div class="accordion-body">
+                                        People Content here
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- More accordion items... -->
+                        </div>
+
+                        <div id="cars-tab" class="accordion mb-2">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                        data-bs-target="#carsSection">
+                                        Cars tab
+                                    </button>
+                                </h2>
+                                <div id="carsSection" class="accordion-collapse collapse">
+                                    <div class="accordion-body">
+                                        Cars Content here
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- More accordion items... -->
+                        </div>
+
+                        <div id="foods-tab" class="accordion mb-2">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                        data-bs-target="#foodsSection">
+                                        Foods tab
+                                    </button>
+                                </h2>
+                                <div id="foodsSection" class="accordion-collapse collapse">
+                                    <div class="accordion-body">
+                                        Foods Content here
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- More accordion items... -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+    </main>
+    <footer>
+        <!-- place footer here -->
+    </footer>
+    <!-- Bootstrap JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"
+        integrity="sha384-I7E8VVD/ismYTF4hNIPjVp/Zjvgyol6VFvRkX/vR+Vc4jQkC+hVqc2pM8ODewa9r"
+        crossorigin="anonymous"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.min.js"
+        integrity="sha384-BBtl+eGJRgqQAUMxJ7pMwbEyER4l1g+O15P+16Ep7Q9Q+zqX6gSbd85u4mG4QzX+"
+        crossorigin="anonymous"></script>
+    <script>
+        // Accordion state persistence (session-only)
+        document.addEventListener('DOMContentLoaded', function () {
+            enableAccordionPersistence();
+        });
+
+        function enableAccordionPersistence() {
+            const accordions = document.querySelectorAll('[data-persist-accordion]');
+            const storageKey = 'accordion_states';
+
+            accordions.forEach(container => {
+                const recordId = container.dataset.persistAccordion;
+
+                // Restore saved states on load
+                const allStates = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+                const savedStates = allStates[recordId] || {};
+
+                Object.keys(savedStates).forEach(collapseId => {
+                    const collapseEl = document.getElementById(collapseId);
+                    if (collapseEl) {
+                        const collapse = new bootstrap.Collapse(collapseEl, {
+                            toggle: false
+                        });
+
+                        if (savedStates[collapseId]) {
+                            collapse.show();
+                        } else {
+                            collapse.hide();
+                        }
+                    }
+                });
+
+                // Listen for state changes
+                container.addEventListener('shown.bs.collapse', function (e) {
+                    const allStates = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+                    if (!allStates[recordId]) allStates[recordId] = {};
+                    allStates[recordId][e.target.id] = true;
+                    sessionStorage.setItem(storageKey, JSON.stringify(allStates));
+                });
+
+                container.addEventListener('hidden.bs.collapse', function (e) {
+                    const allStates = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
+                    if (!allStates[recordId]) allStates[recordId] = {};
+                    allStates[recordId][e.target.id] = false;
+                    sessionStorage.setItem(storageKey, JSON.stringify(allStates));
+                });
+            });
+        }
+    </script>
+</body>
+
+</html>
