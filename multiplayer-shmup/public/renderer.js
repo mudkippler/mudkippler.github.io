@@ -1,7 +1,7 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-export function draw(myId, players, bullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage) {
+export function draw(myId, players, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Grave markers (small crosses where players have died)
@@ -79,10 +79,37 @@ export function draw(myId, players, bullets, bossBullets, boss, fullDamageLog, d
     const PLAYER_RADIUS = 10;
 
     for (const p of players) {
+        // Dead players linger as faded bodies waiting to be revived
+        if (p.dead) ctx.globalAlpha = 0.35;
+
         ctx.fillStyle = p.color;
         ctx.beginPath();
         ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
         ctx.fill();
+
+        if (p.dead) {
+            // Cross over the body
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p.x - 5, p.y - 5);
+            ctx.lineTo(p.x + 5, p.y + 5);
+            ctx.moveTo(p.x + 5, p.y - 5);
+            ctx.lineTo(p.x - 5, p.y + 5);
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 1;
+
+            // Revive progress ring while a teammate stands on the body
+            if (p.revive > 0) {
+                ctx.strokeStyle = '#4f4';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, PLAYER_RADIUS + 6, -Math.PI / 2, -Math.PI / 2 + p.revive * Math.PI * 2);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+            }
+        }
 
         // Name tag
         if (p.name) {
@@ -93,13 +120,16 @@ export function draw(myId, players, bullets, bossBullets, boss, fullDamageLog, d
             ctx.textAlign = 'left';
         }
 
-        // Health bar
-        const healthPercentage = p.health / 100;
-        const hue = healthPercentage * 120;
-        ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
-        ctx.fillRect(p.x - 15, p.y - 20, 30 * healthPercentage, 5);
-        ctx.strokeStyle = 'black';
-        ctx.strokeRect(p.x - 15, p.y - 20, 30, 5);
+        if (!p.dead) {
+            // Health bar
+            const healthPercentage = p.health / 100;
+            const hue = healthPercentage * 120;
+            ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+            ctx.fillRect(p.x - 15, p.y - 20, 30 * healthPercentage, 5);
+            ctx.strokeStyle = 'black';
+            ctx.strokeRect(p.x - 15, p.y - 20, 30, 5);
+        }
+        ctx.globalAlpha = 1;
     }
 
     // Bullets (always the local player's — bullets are simulated client-side only)
@@ -110,6 +140,16 @@ export function draw(myId, players, bullets, bossBullets, boss, fullDamageLog, d
         ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
         ctx.fill();
     }
+
+    // Ally bullets (relayed shot origins, simulated locally), slightly faded
+    ctx.globalAlpha = 0.75;
+    for (const b of allyBullets) {
+        ctx.fillStyle = b.color || 'white';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
 
     // Boss Bullets
     for (const b of bossBullets) {

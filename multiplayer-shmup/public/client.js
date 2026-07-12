@@ -28,8 +28,8 @@ const PLAYER_RADIUS = 10;
 const PLAYER_BULLET_SPEED = 5;
 const PLAYER_SHOT_COOLDOWN = 200; // ms
 const PLAYER_SPEED_PER_SEC = 150; // matches server's PLAYER_SPEED(10) * TICK_RATE(15)
-const RESPAWN_DELAY = 1500; // ms
 const ORB_RADIUS = 18; // collision/render size for the phase-2 orbs
+const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 const BOSS_MESSAGE_DURATION = 4000; // ms boss speech stays on screen
 
 // Fallback attack parameters; overwritten by the encounter config the server
@@ -65,6 +65,7 @@ let graves = [];
 let myPos = null;
 
 let bullets = []; // local player bullets
+let allyBullets = []; // teammates' bullets, spawned from relayed shot origins
 let bossBullets = []; // local boss bullets
 let bulletIdCounter = 0;
 let lastShot = 0;
@@ -78,19 +79,6 @@ function send(message) {
     const payload = serializer(message);
     socket.send(USE_MSGPACK_COMPRESSION ? payload.buffer : payload);
     addSentBytes(USE_MSGPACK_COMPRESSION ? payload.byteLength : payload.length);
-}
-
-function resetLocalState() {
-    myId = null;
-    isDead = false;
-    players = {};
-    myPos = null;
-    bullets = [];
-    bossBullets = [];
-    damagePopups.length = 0;
-    lastShot = 0;
-    lastBossAttack = 0;
-    bossAngleOffset = 0;
 }
 
 // --- Menu / lobby UI ------------------------------------------------------
@@ -188,33 +176,6 @@ for (const input of [playerNameInput, joinCodeInput]) {
     input.addEventListener('keydown', e => e.stopPropagation());
 }
 
-// --- Respawn --------------------------------------------------------------
-
-let respawnCountdownInterval = null;
-
-function startRespawnCountdown() {
-    const countdownEl = document.getElementById('respawn-countdown');
-    const deathTime = performance.now();
-
-    const tick = () => {
-        const remaining = Math.max(0, RESPAWN_DELAY - (performance.now() - deathTime));
-        countdownEl.textContent = (remaining / 1000).toFixed(1);
-        if (remaining <= 0) clearInterval(respawnCountdownInterval);
-    };
-
-    tick();
-    respawnCountdownInterval = setInterval(tick, 100);
-}
-
-function respawn() {
-    clearInterval(respawnCountdownInterval);
-    document.getElementById('death-screen').style.display = 'none';
-    resetLocalState();
-    // Rejoin the same lobby under the same name; the game is already running
-    // there so the server drops us straight back in.
-    connectAndSend({ type: 'joinLobby', code: lobbyCode, name: myName });
-}
-
 // --- Connection -----------------------------------------------------------
 
 function connect() {
@@ -295,6 +256,14 @@ function connect() {
             }
             players = newPlayers;
 
+            // Fallback revive detection: a team wipe resets the encounter and
+            // brings everyone back without a per-player 'revived' message.
+            if (isDead && players[myId] && !players[myId].dead) {
+                isDead = false;
+                myPos = null; // re-snap prediction to the server's respawn position
+                document.getElementById('death-screen').style.display = 'none';
+            }
+
             boss = { ...boss, ...data.boss };
             phase = data.phase || 1;
             orbs = data.orbs || [];
@@ -308,10 +277,25 @@ function connect() {
         }
 
         if (data.type === 'dead') {
+            // Death is permanent for this run: spectate until a teammate
+            // revives you (or the whole party wipes and the encounter resets).
             isDead = true;
+            bullets = [];
             document.getElementById('death-screen').style.display = 'block';
-            startRespawnCountdown();
-            setTimeout(respawn, RESPAWN_DELAY);
+            return;
+        }
+
+        if (data.type === 'revived') {
+            isDead = false;
+            myPos = null; // re-snap prediction to the server position (our body)
+            document.getElementById('death-screen').style.display = 'none';
+            return;
+        }
+
+        if (data.type === 'shot') {
+            // A teammate fired: spawn their bullet locally from the relayed
+            // origin. Trajectory is implied — bullets travel straight up.
+            allyBullets.push({ x: data.x, y: data.y, dx: 0, dy: -PLAYER_BULLET_SPEED, color: data.color });
             return;
         }
 
@@ -445,8 +429,33 @@ function getInterpolatedPosition(entity, now) {
     return { x: interpolatedX, y: interpolatedY };
 }
 
-function addDamagePopup(x, y, amount, color) {
-    damagePopups.push({ x, y, amount, color, alpha: 1, dy: -0.5 });
+function addDamagePopup(x, y, amount, color, alpha = 1) {
+    damagePopups.push({ x, y, amount, color, alpha, dy: -0.5 });
+}
+
+// Ally bullets are cosmetic: the shooter reports the real damage, we just
+// animate the bullet and pop a faded damage number when it visually connects.
+// Runs even while we're dead so spectating still shows the fight.
+function updateAllyBullets() {
+    for (let i = allyBullets.length - 1; i >= 0; i--) {
+        const b = allyBullets[i];
+        b.x += b.dx;
+        b.y += b.dy;
+
+        let hit = false;
+        if (phase === 1) {
+            hit = Math.hypot(b.x - boss.x, b.y - boss.y) < boss.radius;
+        } else if (phase === 2) {
+            hit = orbs.some(orb => orb.hp > 0 && Math.hypot(b.x - orb.x, b.y - orb.y) < ORB_RADIUS);
+        }
+        if (hit) {
+            addDamagePopup(b.x, b.y, 10, b.color, ALLY_ALPHA);
+        }
+
+        if (hit || b.x < 0 || b.x > 800 || b.y < -20) {
+            allyBullets.splice(i, 1);
+        }
+    }
 }
 
 function updateLocalCombat(now, myPos) {
@@ -460,6 +469,8 @@ function updateLocalCombat(now, myPos) {
             dx: 0,
             dy: -PLAYER_BULLET_SPEED
         });
+        // Tell teammates where the shot originated so they can render it
+        send({ type: 'shot', x: myPos.x, y: myPos.y });
     }
 
     // Local boss attack simulation (cosmetic/local only, not synced across
@@ -583,8 +594,11 @@ function gameLoop() {
     if (inGame && !isDead) {
         updateLocalCombat(now, me);
     }
+    if (inGame) {
+        updateAllyBullets(); // runs even while dead, so spectating shows the fight
+    }
 
-    draw(myId, interpolatedPlayers, bullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage);
     updateHUD(myId, Object.values(players));
     updateDiagnostics();
     requestAnimationFrame(gameLoop);

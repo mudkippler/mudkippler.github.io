@@ -38,6 +38,14 @@ const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report 
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
 const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
 const CHAT_MAX_LENGTH = 200;
+const SHOT_RELAY_MIN_INTERVAL = 150; // ms, just under the client's fire cooldown
+// Death is permanent within a run: a living teammate must stand on the body
+// for REVIVE_TIME to bring a player back. If everyone is dead the encounter
+// resets after a short pause so the lobby isn't stuck.
+const REVIVE_RADIUS = 30; // px
+const REVIVE_TIME = 3000; // ms of continuous overlap
+const REVIVE_HEALTH = 50; // revived players come back at half health
+const TEAM_WIPE_RESET_DELAY = 4000; // ms
 const NAME_MAX_LENGTH = 16;
 const GRAVE_LIMIT = 50; // cap so init payload/memory don't grow unbounded
 const LOBBY_MAX_PLAYERS = 8;
@@ -99,6 +107,7 @@ function createLobby(encounterId) {
     hostId: null,
     started: false,
     emptyAt: null,
+    wipeAt: null, // set when every player is dead; encounter resets shortly after
     players: {},
     boss: { x: 400, y: 100, radius: 30, hp: encounter.bossMaxHp, maxHp: encounter.bossMaxHp },
     phase: 1, // 1: boss health bar, 2: twin orbs (co-op check), 3: defeated
@@ -168,8 +177,10 @@ function joinLobby(ws, lobby, rawName) {
     lastActive: Date.now(),
     lastDamageReport: 0,
     lastChat: 0,
+    lastShotRelay: 0,
     health: 100,
-    dead: false
+    dead: false,
+    reviveProgress: 0 // ms a living teammate has spent standing on this body
   };
 
   lobby.players[id] = player;
@@ -290,27 +301,48 @@ wss.on('connection', (ws) => {
           }
         }
       } else if (data.type === 'playerDamage') {
-        if (!lobby.started) return;
+        if (!lobby.started || player.dead) return;
         const now = Date.now();
         if (now - player.lastDamageReport < DAMAGE_REPORT_MIN_INTERVAL) return;
         player.lastDamageReport = now;
 
         player.health -= BULLET_DAMAGE;
         if (player.health <= 0 && !player.dead) {
+          player.health = 0;
           player.dead = true;
+          player.reviveProgress = 0;
 
           const grave = { x: t(player.x), y: t(player.y), color: player.color };
           lobby.graves.push(grave);
           if (lobby.graves.length > GRAVE_LIMIT) lobby.graves.shift();
           lobbyBroadcast(lobby, serialize({ type: 'grave', ...grave }));
 
+          // Death is permanent: the socket stays open so the player can
+          // spectate and be revived by a teammate standing on the body.
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(serialize({ type: 'dead' }));
-            // close() flushes the queued 'dead' message before closing the
-            // connection; terminate() destroys the socket immediately and
-            // can drop it (client never learns it died).
-            ws.close(1000, 'dead');
           }
+
+          if (Object.values(lobby.players).every(p => p.dead)) {
+            lobby.wipeAt = now;
+            bossSay(lobby, 'and so falls your whole party...');
+          }
+        }
+      } else if (data.type === 'shot') {
+        // Relay the shot origin to teammates so they can render ally bullets
+        // locally. Trajectory is implied (bullets always travel straight up).
+        if (!lobby.started || player.dead) return;
+        const now = Date.now();
+        if (now - player.lastShotRelay < SHOT_RELAY_MIN_INTERVAL) return;
+        player.lastShotRelay = now;
+
+        const x = Math.max(0, Math.min(800, Number(data.x) || 0));
+        const y = Math.max(0, Math.min(600, Number(data.y) || 0));
+        const shotMessage = serialize({ type: 'shot', id: ws.id, x: t(x), y: t(y), color: player.color });
+        for (const pid in lobby.players) {
+          if (Number(pid) === ws.id) continue; // shooter already renders its own bullet
+          const peer = lobby.players[pid].ws;
+          if (peer && peer.readyState === WebSocket.OPEN) peer.send(shotMessage);
         }
       } else if (data.type === 'chat') {
         const now = Date.now();
@@ -357,9 +389,28 @@ function gameLoop() {
       }
     }
 
-    // Update players
+    // A full wipe resets the encounter after a short pause
+    if (lobby.wipeAt !== null && now - lobby.wipeAt > TEAM_WIPE_RESET_DELAY) {
+      lobby.wipeAt = null;
+      lobby.boss.hp = lobby.boss.maxHp;
+      lobby.phase = 1;
+      lobby.orbs = [];
+      for (const id in lobby.players) {
+        const p = lobby.players[id];
+        p.dead = false;
+        p.health = 100;
+        p.reviveProgress = 0;
+        p.x = Math.random() * 800;
+        p.y = Math.random() * 600;
+        p.keys = {};
+      }
+      bossSay(lobby, 'back for another beating?');
+    }
+
+    // Update players (dead bodies stay where they fell)
     for (const id in lobby.players) {
       const p = lobby.players[id];
+      if (p.dead) continue;
       p.vx = 0;
       p.vy = 0;
       if (p.keys['ArrowUp'] || p.keys['w']) p.vy -= 1;
@@ -381,6 +432,26 @@ function gameLoop() {
       p.y = Math.max(0, Math.min(600, p.y));
     }
 
+    // Revives: a living teammate standing on a body fills its revive meter;
+    // stepping away resets it.
+    const livingPlayers = Object.values(lobby.players).filter(p => !p.dead);
+    for (const id in lobby.players) {
+      const d = lobby.players[id];
+      if (!d.dead) continue;
+      const beingRevived = livingPlayers.some(p => Math.hypot(p.x - d.x, p.y - d.y) < REVIVE_RADIUS);
+      if (beingRevived) {
+        d.reviveProgress += 1000 / TICK_RATE;
+        if (d.reviveProgress >= REVIVE_TIME) {
+          d.dead = false;
+          d.health = REVIVE_HEALTH;
+          d.reviveProgress = 0;
+          if (d.ws && d.ws.readyState === WebSocket.OPEN) d.ws.send(serialize({ type: 'revived' }));
+        }
+      } else {
+        d.reviveProgress = 0;
+      }
+    }
+
     // Phase 2: bob the orbs and enforce the kill-together window
     if (lobby.phase === 2) {
       for (const orb of lobby.orbs) {
@@ -398,7 +469,10 @@ function gameLoop() {
     // Send game state: positions/health, boss health, and phase/orbs. No bullets.
     lobbyBroadcast(lobby, serialize({
       type: 'state',
-      players: Object.values(lobby.players).map(p => ({ id: p.id, x: t(p.x), y: t(p.y), color: p.color, health: p.health, name: p.name })),
+      players: Object.values(lobby.players).map(p => ({
+        id: p.id, x: t(p.x), y: t(p.y), color: p.color, health: p.health, name: p.name,
+        dead: p.dead, revive: p.dead ? t(p.reviveProgress / REVIVE_TIME) : 0
+      })),
       boss: { x: t(lobby.boss.x), y: t(lobby.boss.y), hp: lobby.boss.hp, maxHp: lobby.boss.maxHp },
       phase: lobby.phase,
       orbs: publicOrbs(lobby)

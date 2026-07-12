@@ -22,14 +22,23 @@
         #death-screen {
             display: none;
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(120, 20, 20, 0.85);
             color: white;
+            font-family: 'Courier New', Courier, monospace;
             text-align: center;
-            padding-top: 25%;
+            padding: 10px 24px;
+            border: 2px solid #f44;
+            border-radius: 6px;
+            pointer-events: none;
+        }
+        #death-screen h2 {
+            margin: 0 0 4px;
+        }
+        #death-screen p {
+            margin: 0;
         }
     #diagnostics {
             width: 800px;
@@ -140,10 +149,18 @@
         .overlay-panel button.secondary:hover {
             background: #555;
         }
-        .menu-divider {
-            text-align: center;
-            color: #666;
-            margin: 20px 0 8px;
+        .menu-section {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            padding: 12px 16px 16px;
+            margin-top: 16px;
+        }
+        .menu-section h3 {
+            margin: 0 0 4px;
+            color: #ddd;
+        }
+        .menu-section label:first-of-type {
+            margin-top: 4px;
         }
         #menu-error, #lobby-error {
             color: #f66;
@@ -204,27 +221,36 @@
         <input id="chat-input" type="text" placeholder="Press Enter to chat..." maxlength="200" />
     </div>
     <div id="death-screen">
-        <h1>You died!</h1>
-        <p>Respawning in <span id="respawn-countdown"></span>s...</p>
+        <h2>You died!</h2>
+        <p>A teammate can revive you by standing on your body for 3s.</p>
     </div>
     <div id="menu" class="overlay">
         <div class="overlay-panel">
             <h1>Bullet Hell</h1>
-            <label for="player-name">Your name</label>
-            <input id="player-name" type="text" maxlength="16" placeholder="anon" />
 
-            <label for="encounter-select">Encounter</label>
-            <select id="encounter-select">
-                <option value="twin">The Twin Guardian — classic boss with a co-op orb phase</option>
-                <option value="storm">Bullet Storm — dense bullets, no orb phase</option>
-                <option value="blitz">Blitz — low HP boss, very fast bullets</option>
-            </select>
-            <button id="create-btn">Create Lobby</button>
+            <div class="menu-section">
+                <h3>Player</h3>
+                <label for="player-name">Your name</label>
+                <input id="player-name" type="text" maxlength="16" placeholder="anon" />
+            </div>
 
-            <div class="menu-divider">— or join a friend —</div>
-            <label for="join-code">Lobby code</label>
-            <input id="join-code" type="text" maxlength="5" placeholder="e.g. XK4P2" style="text-transform: uppercase;" />
-            <button id="join-btn" class="secondary">Join Lobby</button>
+            <div class="menu-section">
+                <h3>Create a lobby</h3>
+                <label for="encounter-select">Encounter</label>
+                <select id="encounter-select">
+                    <option value="twin">The Twin Guardian — classic boss with a co-op orb phase</option>
+                    <option value="storm">Bullet Storm — dense bullets, no orb phase</option>
+                    <option value="blitz">Blitz — low HP boss, very fast bullets</option>
+                </select>
+                <button id="create-btn">Create Lobby</button>
+            </div>
+
+            <div class="menu-section">
+                <h3>Join a lobby</h3>
+                <label for="join-code">Lobby code</label>
+                <input id="join-code" type="text" maxlength="5" placeholder="e.g. XK4P2" style="text-transform: uppercase;" />
+                <button id="join-btn" class="secondary">Join Lobby</button>
+            </div>
 
             <div id="menu-error"></div>
         </div>
