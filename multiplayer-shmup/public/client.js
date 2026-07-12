@@ -27,10 +27,18 @@ let socket;
 const PLAYER_RADIUS = 10;
 const PLAYER_BULLET_SPEED = 5;
 const PLAYER_SHOT_COOLDOWN = 200; // ms
-const PLAYER_SPEED_PER_SEC = 150; // matches server's PLAYER_SPEED(10) * TICK_RATE(15)
+const PLAYER_SPEED_PER_SEC = 150; // matches the server's dt-scaled movement speed
 const ORB_RADIUS = 18; // collision/render size for the phase-2 orbs
 const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 const BOSS_MESSAGE_DURATION = 4000; // ms boss speech stays on screen
+
+// Reconciliation for our own predicted position against the server's
+// authoritative copy: below this we don't bother (rounding/interpolation
+// noise), above SNAP we assume something discontinuous happened (revive,
+// clamp) and jump straight there instead of visibly sliding.
+const RECONCILE_DEADZONE = 3; // px
+const RECONCILE_SNAP = 80; // px
+const RECONCILE_RATE = 0.15; // fraction of the gap closed per state update
 
 // Fallback attack parameters; overwritten by the encounter config the server
 // sends on join. Attack rate/pattern is what differentiates encounters.
@@ -161,6 +169,10 @@ document.getElementById('start-btn').addEventListener('click', () => {
     send({ type: 'startGame' });
 });
 
+document.getElementById('restart-btn').addEventListener('click', () => {
+    send({ type: 'restartGame' });
+});
+
 document.getElementById('copy-link-btn').addEventListener('click', () => {
     const link = document.getElementById('invite-link');
     link.select();
@@ -264,10 +276,31 @@ function connect() {
                 document.getElementById('death-screen').style.display = 'none';
             }
 
+            // Reconcile our own predicted position against the server's
+            // authoritative copy. Prediction should track the server closely
+            // now that both scale movement by real elapsed time, but this
+            // guards against residual drift from dropped movementUpdate
+            // packets or reconnects rather than letting it accumulate forever.
+            if (myPos && players[myId]) {
+                const server = players[myId];
+                const dx = server.x - myPos.x;
+                const dy = server.y - myPos.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > RECONCILE_SNAP) {
+                    myPos.x = server.x;
+                    myPos.y = server.y;
+                } else if (dist > RECONCILE_DEADZONE) {
+                    myPos.x += dx * RECONCILE_RATE;
+                    myPos.y += dy * RECONCILE_RATE;
+                }
+            }
+
             boss = { ...boss, ...data.boss };
             phase = data.phase || 1;
             orbs = data.orbs || [];
             document.getElementById('victory-banner').style.display = phase === 3 ? 'block' : 'none';
+            document.getElementById('restart-btn').style.display = phase === 3 && isHost ? 'inline-block' : 'none';
+            document.getElementById('victory-waiting').style.display = phase === 3 && !isHost ? 'block' : 'none';
             return;
         }
 

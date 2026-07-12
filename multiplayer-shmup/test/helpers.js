@@ -36,6 +36,18 @@ function makeClient(name) {
       else if (Date.now() - start > timeout) { clearInterval(poll); rej(new Error(`${name}: timeout waiting for ${type}`)); }
     }, 20);
   });
+  // Like waitFor, but only considers messages that arrive after this call —
+  // use for periodic broadcasts (e.g. the leaderboard's 1s timer) where a
+  // stale message already sitting in `messages` would give a false match.
+  client.waitForNext = (type, timeout = 4000) => new Promise((res, rej) => {
+    const startLen = client.messages.length;
+    const start = Date.now();
+    const poll = setInterval(() => {
+      const m = client.messages.slice(startLen).find(m => m.type === type);
+      if (m) { clearInterval(poll); res(m); }
+      else if (Date.now() - start > timeout) { clearInterval(poll); rej(new Error(`${name}: timeout waiting for next ${type}`)); }
+    }, 20);
+  });
   client.lastState = () => [...client.messages].reverse().find(m => m.type === 'state');
   client.me = () => {
     const s = client.lastState();

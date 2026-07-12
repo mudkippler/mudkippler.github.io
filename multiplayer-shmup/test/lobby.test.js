@@ -63,8 +63,9 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   const otherBossFine = ![...other.messages].some(m => m.type === 'state');
   check(lastState.boss.hp === 3490 && otherBossFine, `boss damage scoped to own lobby (hp=${lastState.boss.hp})`);
 
-  // Leaderboard carries names
-  const lb = await host.waitFor('leaderboard', 3000);
+  // Leaderboard carries names — wait for a fresh broadcast (one sent after
+  // bossDamage above), not a stale one already queued from before it.
+  const lb = await host.waitForNext('leaderboard', 3000);
   const entry = Object.values(lb.damageLog).find(e => e.name === 'Alice');
   check(entry && entry.dmg >= 10, 'leaderboard entry has name and damage');
 

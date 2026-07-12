@@ -62,7 +62,29 @@
             padding: 12px 24px;
             border: 2px solid #4f4;
             border-radius: 6px;
-            pointer-events: none;
+            text-align: center;
+        }
+        #victory-controls {
+            margin-top: 10px;
+            font-size: 1rem;
+            pointer-events: auto;
+        }
+        #restart-btn {
+            display: none;
+            background: #2a5;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            font-family: inherit;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        #restart-btn:hover {
+            background: #3c6;
+        }
+        #victory-waiting {
+            display: none;
+            color: #cfc;
         }
         #chat {
             width: 800px;
@@ -213,7 +235,13 @@
 
 <body>
     <canvas id="game" width="800" height="600"></canvas>
-    <div id="victory-banner">Boss Defeated! Victory!</div>
+    <div id="victory-banner">
+        Boss Defeated! Victory!
+        <div id="victory-controls">
+            <button id="restart-btn">Start New Fight</button>
+            <div id="victory-waiting">Waiting for the host to start a new fight...</div>
+        </div>
+    </div>
     <div id="hud"></div>
     <div id="diagnostics"></div>
     <div id="chat">

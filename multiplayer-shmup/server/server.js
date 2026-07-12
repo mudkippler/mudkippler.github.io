@@ -33,7 +33,13 @@ let playerIdCounter = 0;
 // server is only authoritative for player positions/health and boss health,
 // which is the minimum needed to see other players and share a boss HP pool.
 const TICK_RATE = 15;
-const PLAYER_SPEED = 10;
+// Movement is scaled by measured elapsed time each tick (see gameLoop), not
+// a fixed per-tick step — setInterval isn't precise under load (multiple
+// lobbies, GC pauses), and a fixed-per-tick step would silently run slower
+// or faster than real time, drifting away from the client's own prediction
+// (which scales by requestAnimationFrame's real dt). That drift is what
+// every other player would see as a desynced position.
+const PLAYER_SPEED_PER_SEC = 150; // matches the client's prediction speed
 const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report arbitrary damage
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
 const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
@@ -174,6 +180,26 @@ function broadcastLobbyState(lobby) {
   }));
 }
 
+// Resets an in-progress or finished encounter back to phase 1 with full boss
+// HP and every player alive at full health. Used both for the automatic
+// team-wipe recovery and a host-triggered restart after victory.
+function resetEncounter(lobby) {
+  lobby.wipeAt = null;
+  lobby.boss.hp = lobby.boss.maxHp;
+  lobby.phase = 1;
+  lobby.orbs = [];
+  for (const id in lobby.players) {
+    const p = lobby.players[id];
+    const spawn = spawnPosition();
+    p.dead = false;
+    p.health = 100;
+    p.reviveProgress = 0;
+    p.x = spawn.x;
+    p.y = spawn.y;
+    p.keys = {};
+  }
+}
+
 function startPhase2(lobby) {
   lobby.phase = 2;
   lobby.orbs = [0, 1].map(i => {
@@ -294,6 +320,10 @@ wss.on('connection', (ws) => {
         lobby.started = true;
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
+      } else if (data.type === 'restartGame') {
+        if (ws.id !== lobby.hostId || lobby.phase !== 3) return;
+        resetEncounter(lobby);
+        bossSay(lobby, 'back for another beating?');
       } else if (data.type === 'movementUpdate') {
         player.keys = { ...player.keys, ...data.keys };
         player.lastActive = Date.now();
@@ -395,8 +425,14 @@ wss.on('connection', (ws) => {
   });
 });
 
+let lastTickTime = Date.now();
+
 function gameLoop() {
   const now = Date.now();
+  // Clamp dt so a long stall (debugger pause, laptop sleep) doesn't teleport
+  // everyone forward in one tick — worst case movement just briefly lags.
+  const dt = Math.min((now - lastTickTime) / 1000, 0.25);
+  lastTickTime = now;
 
   for (const code in lobbies) {
     const lobby = lobbies[code];
@@ -424,20 +460,7 @@ function gameLoop() {
 
     // A full wipe resets the encounter after a short pause
     if (lobby.wipeAt !== null && now - lobby.wipeAt > TEAM_WIPE_RESET_DELAY) {
-      lobby.wipeAt = null;
-      lobby.boss.hp = lobby.boss.maxHp;
-      lobby.phase = 1;
-      lobby.orbs = [];
-      for (const id in lobby.players) {
-        const p = lobby.players[id];
-        const spawn = spawnPosition();
-        p.dead = false;
-        p.health = 100;
-        p.reviveProgress = 0;
-        p.x = spawn.x;
-        p.y = spawn.y;
-        p.keys = {};
-      }
+      resetEncounter(lobby);
       bossSay(lobby, 'back for another beating?');
     }
 
@@ -458,8 +481,8 @@ function gameLoop() {
         p.vy /= len;
       }
 
-      p.x += p.vx * PLAYER_SPEED;
-      p.y += p.vy * PLAYER_SPEED;
+      p.x += p.vx * PLAYER_SPEED_PER_SEC * dt;
+      p.y += p.vy * PLAYER_SPEED_PER_SEC * dt;
 
       // Clamp player position to screen bounds
       p.x = Math.max(0, Math.min(800, p.x));
@@ -474,7 +497,7 @@ function gameLoop() {
       if (!d.dead) continue;
       const beingRevived = livingPlayers.some(p => Math.hypot(p.x - d.x, p.y - d.y) < REVIVE_RADIUS);
       if (beingRevived) {
-        d.reviveProgress += 1000 / TICK_RATE;
+        d.reviveProgress += dt * 1000;
         if (d.reviveProgress >= REVIVE_TIME) {
           d.dead = false;
           d.health = REVIVE_HEALTH;
@@ -482,7 +505,7 @@ function gameLoop() {
           if (d.ws && d.ws.readyState === WebSocket.OPEN) d.ws.send(serialize({ type: 'revived' }));
         }
       } else {
-        d.reviveProgress = Math.max(0, d.reviveProgress - (1000 / TICK_RATE) * REVIVE_DECAY_MULTIPLIER);
+        d.reviveProgress = Math.max(0, d.reviveProgress - dt * 1000 * REVIVE_DECAY_MULTIPLIER);
       }
     }
 
