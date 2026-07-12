@@ -80,7 +80,7 @@ const ORB_KILL_WINDOW = 3000; // ms
 const ENCOUNTERS = {
   twin: {
     id: 'twin', name: 'The Twin Guardian',
-    bossMaxHp: 500, hasOrbPhase: true,
+    bossMaxHp: 2500, hasOrbPhase: true,
     attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1,
     chaseMaxHp: 800, chaseSpeed: 70, aimedShotInterval: 1400, aimedBulletSpeed: 3.2
   },
