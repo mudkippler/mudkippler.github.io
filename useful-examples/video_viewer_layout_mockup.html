@@ -1,0 +1,119 @@
+
+<style>
+  html {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif
+  }
+  
+  .vv-root { display: flex; flex-direction: column; height: 520px; overflow: hidden; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); background: var(--color-background-tertiary); font-size: 14px; border: 2px solid black; }
+  .vv-toolbar { flex: 0 0 auto; height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--color-background-primary); border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .vv-toolbar-title { font-weight: 500; color: var(--color-text-primary); }
+  .vv-toolbar-spacer { flex: 1; }
+  .vv-workspace { flex: 1 1 0; min-height: 0; display: flex; }
+  
+  .vv-video-pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 2px solid green; }
+  
+  .vv-screen { flex: 1 1 0; min-height: 0; background: #000; display: flex; align-items: center; justify-content: center; position: relative; }
+  .vv-screen svg { width: 64px; height: 64px; opacity: 0.3; }
+  .vv-timestamp { position: absolute; bottom: 10px; right: 12px; font-size: 12px; color: rgba(255,255,255,0.6); font-family: var(--font-mono); }
+  .vv-controls { flex: 0 0 auto; padding: 10px 14px; background: var(--color-background-primary); border-top: 0.5px solid var(--color-border-tertiary); display: flex; flex-direction: column; gap: 8px; }
+  .vv-progress { width: 100%; height: 4px; background: var(--color-border-tertiary); border-radius: 2px; cursor: pointer; }
+  .vv-progress-fill { height: 100%; width: 38%; background: var(--color-text-primary); border-radius: 2px; }
+  .vv-ctrl-row { display: flex; align-items: center; gap: 12px; }
+  .vv-ctrl-row i { font-size: 18px; color: var(--color-text-secondary); cursor: pointer; }
+  .vv-ctrl-row i:hover { color: var(--color-text-primary); }
+  .vv-time { font-size: 12px; color: var(--color-text-secondary); font-family: var(--font-mono); margin-left: auto; }
+  
+  .vv-meta-pane { width: 20vw; flex: 0 0 20vw; min-height: 0; overflow-y: auto; background: var(--color-background-primary); border-left: 0.5px solid var(--color-border-tertiary); display: flex; flex-direction: column; border: 2px solid red;}
+  .vv-meta-section { padding: 14px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .vv-meta-label { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-tertiary); margin-bottom: 8px; }
+  .vv-meta-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 13px; }
+  .vv-meta-row span:first-child { color: var(--color-text-secondary); }
+  .vv-meta-row span:last-child { color: var(--color-text-primary); font-weight: 500; }
+  
+  .vv-tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-secondary); margin: 2px 2px 2px 0; }
+  .vv-thumb-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 14px; }
+  .vv-thumb { aspect-ratio: 16/9; background: var(--color-background-secondary); border-radius: 4px; border: 0.5px solid var(--color-border-tertiary); }
+  .vv-thumb.active { border-color: var(--color-text-primary); }
+</style>
+
+<h2 class="sr-only">Video viewer layout mockup showing toolbar, video pane with controls, and scrollable metadata sidebar</h2>
+
+<div class="vv-root">
+  <div class="vv-toolbar">
+    <i class="ti ti-arrow-left" aria-hidden="true" style="font-size:18px; color:var(--color-text-secondary);"></i>
+    <span class="vv-toolbar-title">security_cam_04 — 2026-05-18</span>
+    <div class="vv-toolbar-spacer"></div>
+    <i class="ti ti-download" aria-hidden="true" style="font-size:18px; color:var(--color-text-secondary);"></i>
+    <i class="ti ti-dots" aria-hidden="true" style="font-size:18px; color:var(--color-text-secondary);"></i>
+  </div>
+
+  <div class="vv-workspace">
+    <div class="vv-video-pane">
+      <div class="vv-screen">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" stroke="white" stroke-width="2"/>
+          <polygon points="26,20 50,32 26,44" fill="white"/>
+        </svg>
+        <span class="vv-timestamp">00:14:22 / 00:37:10</span>
+      </div>
+      <div class="vv-controls">
+        <div class="vv-progress"><div class="vv-progress-fill"></div></div>
+        <div class="vv-ctrl-row">
+          <button id="play-btn" aria-hidden="true">▶️</button>
+          <button id="pause-btn" aria-hidden="true">⏸️</button>
+          <i class="ti ti-player-skip-forward" aria-hidden="true"></i>
+          <i class="ti ti-volume" aria-hidden="true"></i>
+          <span class="vv-time">14:22 / 37:10</span>
+          <i class="ti ti-maximize" aria-hidden="true"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="vv-meta-pane">
+      <div class="vv-meta-section">
+        <div class="vv-meta-label">File info</div>
+        <div class="vv-meta-row"><span>Camera</span><span>CAM-04</span></div>
+        <div class="vv-meta-row"><span>Location</span><span>Entrance B</span></div>
+        <div class="vv-meta-row"><span>Date</span><span>2026-05-18</span></div>
+        <div class="vv-meta-row"><span>Duration</span><span>37m 10s</span></div>
+        <div class="vv-meta-row"><span>Resolution</span><span>1920×1080</span></div>
+        <div class="vv-meta-row"><span>Codec</span><span>H.264</span></div>
+        <div class="vv-meta-row"><span>Bitrate</span><span>4.2 Mbps</span></div>
+        <div class="vv-meta-row"><span>Size</span><span>1.18 GB</span></div>
+      </div>
+
+      <div class="vv-meta-section">
+        <div class="vv-meta-label">Tags</div>
+        <span class="vv-tag">motion-detected</span>
+        <span class="vv-tag">reviewed</span>
+        <span class="vv-tag">night-mode</span>
+        <span class="vv-tag">exterior</span>
+      </div>
+
+      <div class="vv-meta-section">
+        <div class="vv-meta-label">Events</div>
+        <div class="vv-meta-row"><span>00:04:12</span><span>Motion</span></div>
+        <div class="vv-meta-row"><span>00:09:55</span><span>Motion</span></div>
+        <div class="vv-meta-row"><span>00:14:22</span><span>Person</span></div>
+        <div class="vv-meta-row"><span>00:21:08</span><span>Motion</span></div>
+        <div class="vv-meta-row"><span>00:29:33</span><span>Vehicle</span></div>
+        <div class="vv-meta-row"><span>00:35:01</span><span>Motion</span></div>
+      </div>
+
+      <div>
+        <div class="vv-meta-label" style="padding: 14px 14px 6px;">Thumbnails</div>
+        <div class="vv-thumb-grid">
+          <div class="vv-thumb active"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+          <div class="vv-thumb"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

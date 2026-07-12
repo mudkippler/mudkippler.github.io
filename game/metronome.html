@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sliding Bar Animation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Define CSS variable for bar width */
+        :root {
+            --bar-width: 24px; /* Increased width of the sliding bar for better visibility */
+        }
+
+        /* Apply Inter font and basic styling */
+        body {
+            font-family: "Inter", sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh; /* Full viewport height */
+            background-color: #1a202c; /* Dark background */
+            margin: 0;
+            overflow: hidden; /* Prevent scroll if bar slightly overflows */
+        }
+
+        /* Container for the sliding bar */
+        .slider-container {
+            width: 240px; /* Responsive width */
+            height: 20px; /* Height of the track */
+            background-color: #4a5568; /* Darker grey track */
+            border-radius: 9999px; /* Fully rounded corners */
+            position: relative; /* For absolute positioning of the bar */
+            overflow: hidden; /* Ensure bar stays within rounded container */
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6); /* Inner shadow for depth */
+            /* Added padding and border to better define the track */
+            padding: 2px;
+            border: 1px solid #2d3748; /* Slightly darker border for definition */
+            box-sizing: border-box; /* Include padding and border in the element's total width and height */
+        }
+
+        /* The sliding bar itself */
+        .sliding-bar {
+            width: var(--bar-width); /* Use the CSS variable for width */
+            height: 100%; /* Same height as container (minus padding) */
+            background-color: #fbd38d; /* Yellow color */
+            border-radius: 9999px; /* Fully rounded corners */
+            position: absolute;
+            left: 0; /* Start at the left edge */
+            animation: slide 1.2s linear infinite; /* Animation properties: 0.6s to edge, 0.6s back */
+        }
+
+        /* Keyframe animation for sliding */
+        @keyframes slide {
+            0% {
+                transform: translateX(0%); /* Start at left */
+            }
+            50% {
+                /* Move to the right edge.
+                   Calculate the distance: 100% of container width minus the bar's own width. */
+                transform: translateX(230px);
+            }
+            100% {
+                transform: translateX(0%); /* Return to left */
+            }
+        }
+
+    </style>
+</head>
+<body class="antialiased">
+    <div class="slider-container">
+        <div class="sliding-bar"></div>
+    </div>
+
+    <script>
+        // JavaScript is not strictly necessary for this CSS-only animation,
+        // but this script block is included for completeness.
+        // You could use JavaScript here to dynamically change animation properties,
+        // or add more complex interactions if needed in the future.
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const bar = document.querySelector('.sliding-bar');
+            if (bar) {
+                console.log('Sliding bar animation loaded and ready.');
+            }
+        });
+    </script>
+</body>
+</html>
