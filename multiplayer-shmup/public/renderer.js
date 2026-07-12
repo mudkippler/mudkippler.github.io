@@ -33,7 +33,7 @@ function drawGravestone(x, y, color) {
     ctx.fillRect(x - w / 2, y + h / 2 - 3, w, 3);
 }
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage, phase) {
+export function draw(myId, players, bullets, allyBullets, bossBullets, boss, damagePopups, graves, orbs, phase) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Old permanent grave markers are hidden for now — death is revivable,
@@ -76,23 +76,6 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
             }
         }
         ctx.globalAlpha = 1;
-    }
-
-    // Boss speech (fades out over its last second)
-    if (bossMessage) {
-        const remaining = bossMessage.expiresAt - performance.now();
-        if (remaining > 0) {
-            ctx.globalAlpha = Math.min(1, remaining / 1000);
-            ctx.font = 'italic 22px impact';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'white';
-            ctx.shadowColor = 'black';
-            ctx.shadowBlur = 3;
-            ctx.fillText(bossMessage.text, boss.x, boss.y - boss.radius - 28);
-            ctx.shadowBlur = 0;
-            ctx.globalAlpha = 1;
-            ctx.textAlign = 'left';
-        }
     }
 
     // Players
@@ -203,25 +186,6 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
         if (d.alpha <= 0) damagePopups.splice(i, 1);
     }
     ctx.globalAlpha = 1; // Reset alpha
-
-    // Leaderboard
-    ctx.font = '2rem calibri ';
-    ctx.textAlign = 'left';
-    ctx.fillStyle = 'white';
-    ctx.fillText('Damage Leaderboard', 10, 35);
-
-    let rankY = 65;
-    // Entries are {name, color, dmg} keyed by player id (server-provided)
-    for (const [id, entry] of Object.entries(fullDamageLog).sort((a, b) => b[1].dmg - a[1].dmg)) {
-        ctx.fillStyle = entry.color || 'white';
-        ctx.beginPath();
-        ctx.arc(16, rankY - 7, 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = 'white';
-        ctx.fillText(`${entry.name || id} — ${Math.floor(entry.dmg)} dmg`, 30, rankY);
-        rankY += 25;
-    }
 
     // Draw self indicator (bottom center)
     if (me) {

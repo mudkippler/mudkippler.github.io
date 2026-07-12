@@ -8,16 +8,142 @@
         canvas {
             background: #111;
             display: block;
-            margin: auto;
         }
-        #hud {
+        #canvas-wrap {
+            position: relative;
             width: 800px;
-            margin: 10px auto;
+            margin: 0 auto;
+        }
+        #leaderboard {
+            position: absolute;
+            top: 0;
+            left: 100%;
+            margin-left: 10px;
+            width: 180px;
+            box-sizing: border-box;
             font-family: 'Courier New', Courier, monospace;
             color: white;
             background: #222;
             padding: 10px;
             border: 1px solid #444;
+        }
+        #leaderboard h3 {
+            margin: 0 0 8px;
+            font-size: 0.85rem;
+            white-space: nowrap;
+            color: #ddd;
+            border-bottom: 1px solid #444;
+            padding-bottom: 6px;
+        }
+        #leaderboard-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        #leaderboard-list li {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 0;
+            font-size: 0.85rem;
+        }
+        #leaderboard-list .lb-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        #leaderboard-list .lb-name {
+            flex: 1;
+            overflow-wrap: anywhere;
+        }
+        #leaderboard-list .lb-dmg {
+            color: #aaa;
+            flex-shrink: 0;
+        }
+        #boss-bar {
+            display: none;
+            width: 800px;
+            margin: 0 auto 8px;
+            font-family: Impact, 'Arial Narrow', sans-serif;
+        }
+        #boss-bar-name {
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-size: 1.5rem;
+            line-height: 1.3;
+            margin-bottom: 4px;
+            -webkit-text-stroke: 1px black;
+        }
+        #boss-bar-subtitle {
+            text-align: center;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.75rem;
+            letter-spacing: 0.15em;
+            color: #ccc;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            min-height: 1em;
+        }
+        #boss-bar-track {
+            position: relative;
+            height: 26px;
+            background: #111;
+            border: 2px solid #444;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #boss-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(180deg, #f66, #a11);
+            transition: width 0.15s linear, background 0.3s linear;
+        }
+        #boss-bar-hp-text {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.8rem;
+            color: white;
+            text-shadow: 1px 1px 2px black, -1px -1px 2px black;
+        }
+        #hud {
+            width: 280px;
+            margin: 10px auto;
+            font-family: 'Courier New', Courier, monospace;
+            color: white;
+            background: #222;
+            padding: 8px 10px;
+            border: 1px solid #444;
+        }
+        #hud .hud-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #hud .hud-label {
+            color: #aaa;
+            font-size: 0.75rem;
+        }
+        #hud .hud-bar-track {
+            flex: 1;
+            height: 10px;
+            background: #444;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #hud .hud-bar-fill {
+            height: 100%;
+        }
+        #hud .hud-value {
+            width: 28px;
+            text-align: right;
+            font-size: 0.75rem;
+            color: #ccc;
         }
         #death-screen {
             display: none;
@@ -41,12 +167,14 @@
             margin: 0;
         }
     #diagnostics {
-            width: 800px;
-            margin: 10px auto;
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
             font-family: 'Courier New', Courier, monospace;
-            color: #aaa;
-            background: #222;
-            padding: 10px;
+            font-size: 0.75rem;
+            color: #888;
+            background: rgba(34, 34, 34, 0.85);
+            padding: 6px 10px;
             border: 1px solid #444;
         }
         #victory-banner {
@@ -290,15 +418,33 @@
 </head>
 
 <body>
-    <canvas id="game" width="800" height="600"></canvas>
-    <div id="victory-banner">
-        Boss Defeated! Victory!
-        <div id="victory-controls">
-            <button id="restart-btn">Start New Fight</button>
-            <div id="victory-waiting">Waiting for the host to start a new fight...</div>
+    <div id="boss-bar">
+        <div id="boss-bar-name"></div>
+        <div id="boss-bar-subtitle"></div>
+        <div id="boss-bar-track">
+            <div id="boss-bar-fill"></div>
+            <div id="boss-bar-hp-text"></div>
         </div>
     </div>
-    <div id="pause-banner">Paused</div>
+    <div id="canvas-wrap">
+        <canvas id="game" width="800" height="600"></canvas>
+        <div id="victory-banner">
+            Boss Defeated! Victory!
+            <div id="victory-controls">
+                <button id="restart-btn">Start New Fight</button>
+                <div id="victory-waiting">Waiting for the host to start a new fight...</div>
+            </div>
+        </div>
+        <div id="pause-banner">Paused</div>
+        <div id="death-screen">
+            <h2>You died!</h2>
+            <p>A teammate can revive you by standing on your body for 3s.</p>
+        </div>
+        <div id="leaderboard">
+            <h3>Damage Leaderboard</h3>
+            <ol id="leaderboard-list"></ol>
+        </div>
+    </div>
     <div id="hud"></div>
     <div id="host-controls">
         <span>Host controls:</span>
@@ -317,10 +463,6 @@
     <div id="chat">
         <div id="chat-messages"></div>
         <input id="chat-input" type="text" placeholder="Press Enter to chat..." maxlength="200" />
-    </div>
-    <div id="death-screen">
-        <h2>You died!</h2>
-        <p>A teammate can revive you by standing on your body for 3s.</p>
     </div>
     <div id="menu" class="overlay">
         <div class="overlay-panel">

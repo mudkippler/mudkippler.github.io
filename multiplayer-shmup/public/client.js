@@ -1,5 +1,7 @@
 import { draw } from './renderer.js';
 import { updateHUD } from './hud.js';
+import { updateLeaderboard } from './leaderboard.js';
+import { updateBossBar, getFlairColor } from './bossbar.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
 import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack } from './attacks.js';
 
@@ -30,7 +32,6 @@ const PLAYER_SHOT_COOLDOWN = 200; // ms
 const PLAYER_SPEED_PER_SEC = 150; // matches the server's dt-scaled movement speed
 const ORB_RADIUS = 18; // collision/render size for the phase-2 orbs
 const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
-const BOSS_MESSAGE_DURATION = 4000; // ms boss speech stays on screen
 
 // The client is authoritative for its own position: movementUpdate reports
 // our predicted position and the server adopts it (with a speed sanity
@@ -56,7 +57,6 @@ let players = {};
 let boss = {};
 let phase = 1; // 1: boss, 2: twin orbs, 3: enrage chase, 4: defeated (authoritative from server)
 let orbs = [];
-let bossMessage = null; // {text, expiresAt} — latest boss speech line
 let fullDamageLog = {};
 const damagePopups = [];
 
@@ -433,7 +433,9 @@ function connect() {
         }
 
         if (data.type === 'bossSay') {
-            bossMessage = { text: data.text, expiresAt: performance.now() + BOSS_MESSAGE_DURATION };
+            // Boss speech reads as a chat line, colored to match this
+            // encounter's flair so it's still visually distinct from players.
+            addChatMessage(getFlairColor(encounter.id), `${encounter.name}: ${data.text}`, true);
             return;
         }
     });
@@ -471,9 +473,10 @@ const chatInput = document.getElementById('chat-input');
 const chatMessagesEl = document.getElementById('chat-messages');
 const CHAT_MAX_DISPLAYED = 50;
 
-function addChatMessage(color, text) {
+function addChatMessage(color, text, italic = false) {
     const line = document.createElement('div');
     line.style.color = color || 'white';
+    if (italic) line.style.fontStyle = 'italic';
     line.textContent = text;
     chatMessagesEl.appendChild(line);
     while (chatMessagesEl.children.length > CHAT_MAX_DISPLAYED) {
@@ -789,8 +792,10 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage, phase);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, damagePopups, graves, orbs, phase);
     updateHUD(myId, Object.values(players));
+    updateLeaderboard(myId, fullDamageLog);
+    updateBossBar(encounter, boss, phase, inGame);
     updateDiagnostics();
     requestAnimationFrame(gameLoop);
 }
