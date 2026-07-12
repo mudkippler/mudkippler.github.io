@@ -50,8 +50,9 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   check(s.boss.hp === s.boss.maxHp && s.boss.maxHp === 1500, `host restart resets boss to full main-phase HP (${s.boss.hp}/${s.boss.maxHp})`);
   check(s.players.every(p => !p.dead && p.health === 100), 'host restart brings every player back to full health');
 
-  // Restart is a no-op outside phase 4 (already tested implicitly: repeated
-  // damage now works again since the boss isn't defeated anymore)
+  // Confirm the reset actually took (repeated damage works again since the
+  // boss isn't defeated anymore). Restart itself is no longer gated to
+  // phase 4 — see pause-and-restart.test.js for the mid-fight case.
   host.send({ type: 'bossDamage' });
   await sleep(200);
   s = host.lastState();

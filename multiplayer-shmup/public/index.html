@@ -86,6 +86,62 @@
             display: none;
             color: #cfc;
         }
+        #pause-banner {
+            display: none;
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(40, 40, 40, 0.9);
+            color: #ff4;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 1.5rem;
+            padding: 12px 24px;
+            border: 2px solid #ff4;
+            border-radius: 6px;
+            text-align: center;
+        }
+        #host-controls {
+            display: none;
+            width: 800px;
+            margin: 10px auto;
+            font-family: 'Courier New', Courier, monospace;
+            color: white;
+            background: #222;
+            padding: 10px;
+            border: 1px solid #444;
+            gap: 8px;
+            align-items: center;
+        }
+        #host-controls span {
+            color: #aaa;
+            margin-right: 4px;
+        }
+        #host-controls select {
+            background: #111;
+            color: white;
+            border: 1px solid #444;
+            padding: 6px;
+            font-family: inherit;
+        }
+        #host-controls button {
+            background: #2a5;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            font-family: inherit;
+            font-size: inherit;
+            cursor: pointer;
+        }
+        #host-controls button:hover {
+            background: #3c6;
+        }
+        #pause-btn.active {
+            background: #a52;
+        }
+        #pause-btn.active:hover {
+            background: #c63;
+        }
         #chat {
             width: 800px;
             margin: 10px auto;
@@ -242,7 +298,21 @@
             <div id="victory-waiting">Waiting for the host to start a new fight...</div>
         </div>
     </div>
+    <div id="pause-banner">Paused</div>
     <div id="hud"></div>
+    <div id="host-controls">
+        <span>Host controls:</span>
+        <button id="pause-btn">Pause</button>
+        <select id="change-encounter-select">
+            <option value="twin">The Twin Guardian</option>
+            <option value="storm">Bullet Storm</option>
+            <option value="blitz">Blitz</option>
+            <option value="helix">The Helix</option>
+            <option value="tide">Tidal Warden</option>
+            <option value="rain">Acid Rain</option>
+        </select>
+        <button id="change-boss-btn">Restart with this boss</button>
+    </div>
     <div id="diagnostics"></div>
     <div id="chat">
         <div id="chat-messages"></div>
@@ -269,6 +339,9 @@
                     <option value="twin">The Twin Guardian — classic boss with a co-op orb phase</option>
                     <option value="storm">Bullet Storm — dense bullets, no orb phase</option>
                     <option value="blitz">Blitz — low HP boss, very fast bullets</option>
+                    <option value="helix">The Helix — rotating spiral arms</option>
+                    <option value="tide">Tidal Warden — sweeping downward wave</option>
+                    <option value="rain">Acid Rain — droplets falling from above</option>
                 </select>
                 <button id="create-btn">Create Lobby</button>
             </div>

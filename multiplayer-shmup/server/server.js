@@ -96,6 +96,27 @@ const ENCOUNTERS = {
     bossMaxHp: 1500, hasOrbPhase: false,
     attackRate: 55, numberOfAngles: 4, bulletSpeed: 2, bigRedChance: 0.05,
     chaseMaxHp: 300, chaseSpeed: 110, aimedShotInterval: 800, aimedBulletSpeed: 4.2
+  },
+  // The three below each have a signature bullet pattern instead of the
+  // default rotating ring; `pattern` selects the attack in the client's
+  // updateLocalCombat and the extra fields are that pattern's knobs.
+  helix: {
+    id: 'helix', name: 'The Helix', pattern: 'spiral',
+    bossMaxHp: 2000, hasOrbPhase: false,
+    attackRate: 60, arms: 3, bulletSpeed: 1.6, bigRedChance: 0,
+    chaseMaxHp: 500, chaseSpeed: 80, aimedShotInterval: 1200, aimedBulletSpeed: 3.4
+  },
+  tide: {
+    id: 'tide', name: 'Tidal Warden', pattern: 'wave',
+    bossMaxHp: 2200, hasOrbPhase: false,
+    attackRate: 90, fanCount: 5, bulletSpeed: 1.8, bigRedChance: 0,
+    chaseMaxHp: 600, chaseSpeed: 75, aimedShotInterval: 1100, aimedBulletSpeed: 3.4
+  },
+  rain: {
+    id: 'rain', name: 'Acid Rain', pattern: 'rain',
+    bossMaxHp: 1800, hasOrbPhase: false,
+    attackRate: 45, drops: 3, bulletSpeed: 2.2, bigRedChance: 0,
+    chaseMaxHp: 500, chaseSpeed: 95, aimedShotInterval: 900, aimedBulletSpeed: 3.8
   }
 };
 
@@ -161,6 +182,7 @@ function createLobby(encounterId) {
     encounter,
     hostId: null,
     started: false,
+    paused: false, // host-toggled; freezes simulation but keeps state broadcasts flowing
     emptyAt: null,
     wipeAt: null, // set when every player is dead; encounter resets shortly after
     players: {},
@@ -301,7 +323,8 @@ function joinLobby(ws, lobby, rawName) {
     boss: { ...lobby.boss, x: t(lobby.boss.x), y: t(lobby.boss.y) },
     graves: lobby.graves,
     phase: lobby.phase,
-    orbs: publicOrbs(lobby)
+    orbs: publicOrbs(lobby),
+    paused: lobby.paused
   }));
   broadcastLobbyState(lobby);
 }
@@ -356,15 +379,33 @@ wss.on('connection', (ws) => {
       const player = lobby.players[ws.id];
       if (!player) return;
 
+      // While paused, freeze anything that would move the fight forward;
+      // pause/restart controls and chat still go through so the host can
+      // resume or bail out to a different boss.
+      const PAUSE_EXEMPT_TYPES = new Set(['startGame', 'togglePause', 'restartGame', 'chat']);
+      if (lobby.paused && !PAUSE_EXEMPT_TYPES.has(data.type)) return;
+
       if (data.type === 'startGame') {
         if (ws.id !== lobby.hostId || lobby.started) return;
         lobby.started = true;
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
+      } else if (data.type === 'togglePause') {
+        if (ws.id !== lobby.hostId || !lobby.started) return;
+        lobby.paused = !lobby.paused;
       } else if (data.type === 'restartGame') {
-        if (ws.id !== lobby.hostId || lobby.phase !== 4) return;
+        // Host can restart at any point in the fight, not just after victory
+        // — this doubles as the "give up and try a different boss" control.
+        // Omitting encounterId (the post-victory restart button) just re-fights
+        // the current one.
+        if (ws.id !== lobby.hostId) return;
+        if (data.encounterId && ENCOUNTERS[data.encounterId]) {
+          lobby.encounter = ENCOUNTERS[data.encounterId];
+        }
+        lobby.paused = false;
         resetEncounter(lobby);
         bossSay(lobby, 'back for another beating?');
+        lobbyBroadcast(lobby, serialize({ type: 'encounterChanged', encounter: lobby.encounter }));
       } else if (data.type === 'movementUpdate') {
         player.keys = { ...player.keys, ...data.keys };
         player.lastActive = Date.now();
@@ -540,108 +581,113 @@ function gameLoop() {
       }
     }
 
-    // A full wipe resets the encounter after a short pause
-    if (lobby.wipeAt !== null && now - lobby.wipeAt > TEAM_WIPE_RESET_DELAY) {
-      resetEncounter(lobby);
-      bossSay(lobby, 'back for another beating?');
-    }
-
-    // Update players (dead bodies stay where they fell)
-    for (const id in lobby.players) {
-      const p = lobby.players[id];
-      if (p.dead) continue;
-
-      // Players who report their own predicted position (real clients) are
-      // authoritative for it — simulating keys on top would fight the
-      // reports and jitter. Key-based simulation remains as the fallback
-      // for clients that only send keys (e.g. the test harness).
-      if (now - (p.lastPosReport || 0) < 400) continue;
-
-      p.vx = 0;
-      p.vy = 0;
-      if (p.keys['ArrowUp'] || p.keys['w']) p.vy -= 1;
-      if (p.keys['ArrowDown'] || p.keys['s']) p.vy += 1;
-      if (p.keys['ArrowLeft'] || p.keys['a']) p.vx -= 1;
-      if (p.keys['ArrowRight'] || p.keys['d']) p.vx += 1;
-
-      const len = Math.hypot(p.vx, p.vy);
-      if (len > 0) {
-        p.vx /= len;
-        p.vy /= len;
+    // Everything below advances the fight; skip it all while the host has
+    // paused, but keep broadcasting state below so clients see `paused: true`
+    // and nothing silently goes stale for a reconnecting/late-joining client.
+    if (!lobby.paused) {
+      // A full wipe resets the encounter after a short pause
+      if (lobby.wipeAt !== null && now - lobby.wipeAt > TEAM_WIPE_RESET_DELAY) {
+        resetEncounter(lobby);
+        bossSay(lobby, 'back for another beating?');
       }
 
-      p.x += p.vx * PLAYER_SPEED_PER_SEC * dt;
-      p.y += p.vy * PLAYER_SPEED_PER_SEC * dt;
+      // Update players (dead bodies stay where they fell)
+      for (const id in lobby.players) {
+        const p = lobby.players[id];
+        if (p.dead) continue;
 
-      // Clamp player position to screen bounds
-      p.x = Math.max(0, Math.min(800, p.x));
-      p.y = Math.max(0, Math.min(600, p.y));
-    }
+        // Players who report their own predicted position (real clients) are
+        // authoritative for it — simulating keys on top would fight the
+        // reports and jitter. Key-based simulation remains as the fallback
+        // for clients that only send keys (e.g. the test harness).
+        if (now - (p.lastPosReport || 0) < 400) continue;
 
-    // Revives: a living teammate standing on a body fills its revive meter;
-    // stepping away resets it.
-    const livingPlayers = Object.values(lobby.players).filter(p => !p.dead);
-    for (const id in lobby.players) {
-      const d = lobby.players[id];
-      if (!d.dead) continue;
-      const beingRevived = livingPlayers.some(p => Math.hypot(p.x - d.x, p.y - d.y) < REVIVE_RADIUS);
-      if (beingRevived) {
-        d.reviveProgress += dt * 1000;
-        if (d.reviveProgress >= REVIVE_TIME) {
-          d.dead = false;
-          d.health = REVIVE_HEALTH;
-          d.reviveProgress = 0;
-          if (d.ws && d.ws.readyState === WebSocket.OPEN) d.ws.send(serialize({ type: 'revived' }));
+        p.vx = 0;
+        p.vy = 0;
+        if (p.keys['ArrowUp'] || p.keys['w']) p.vy -= 1;
+        if (p.keys['ArrowDown'] || p.keys['s']) p.vy += 1;
+        if (p.keys['ArrowLeft'] || p.keys['a']) p.vx -= 1;
+        if (p.keys['ArrowRight'] || p.keys['d']) p.vx += 1;
+
+        const len = Math.hypot(p.vx, p.vy);
+        if (len > 0) {
+          p.vx /= len;
+          p.vy /= len;
         }
-      } else {
-        d.reviveProgress = Math.max(0, d.reviveProgress - dt * 1000 * REVIVE_DECAY_MULTIPLIER);
-      }
-    }
 
-    // Phase 2: bob the orbs and enforce the kill-together window
-    if (lobby.phase === 2) {
-      for (const orb of lobby.orbs) {
-        orb.y = orb.baseY + Math.sin(now / 400 + orb.id * Math.PI) * 15;
+        p.x += p.vx * PLAYER_SPEED_PER_SEC * dt;
+        p.y += p.vy * PLAYER_SPEED_PER_SEC * dt;
+
+        // Clamp player position to screen bounds
+        p.x = Math.max(0, Math.min(800, p.x));
+        p.y = Math.max(0, Math.min(600, p.y));
       }
 
-      const dead = lobby.orbs.filter(o => o.hp <= 0);
-      if (dead.length === 1 && now - dead[0].deadAt > ORB_KILL_WINDOW) {
-        dead[0].hp = dead[0].maxHp;
-        dead[0].deadAt = null;
-        bossSay(lobby, 'you must strike them down together!');
+      // Revives: a living teammate standing on a body fills its revive meter;
+      // stepping away resets it.
+      const livingPlayers = Object.values(lobby.players).filter(p => !p.dead);
+      for (const id in lobby.players) {
+        const d = lobby.players[id];
+        if (!d.dead) continue;
+        const beingRevived = livingPlayers.some(p => Math.hypot(p.x - d.x, p.y - d.y) < REVIVE_RADIUS);
+        if (beingRevived) {
+          d.reviveProgress += dt * 1000;
+          if (d.reviveProgress >= REVIVE_TIME) {
+            d.dead = false;
+            d.health = REVIVE_HEALTH;
+            d.reviveProgress = 0;
+            if (d.ws && d.ws.readyState === WebSocket.OPEN) d.ws.send(serialize({ type: 'revived' }));
+          }
+        } else {
+          d.reviveProgress = Math.max(0, d.reviveProgress - dt * 1000 * REVIVE_DECAY_MULTIPLIER);
+        }
       }
-    }
 
-    // Phase 3: the boss roams the arena toward a wandering waypoint and
-    // periodically fires shots aimed at each living player's current spot.
-    // Those shots don't home in after firing, so moving away from where you
-    // were when the volley fired is enough to dodge.
-    if (lobby.phase === 3 && lobby.chase) {
-      const chase = lobby.chase;
-      const dx = chase.waypoint.x - lobby.boss.x;
-      const dy = chase.waypoint.y - lobby.boss.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist < CHASE_WAYPOINT_RADIUS) {
-        chase.waypoint = pickChaseWaypoint();
-      } else {
-        lobby.boss.x += (dx / dist) * lobby.encounter.chaseSpeed * dt;
-        lobby.boss.y += (dy / dist) * lobby.encounter.chaseSpeed * dt;
+      // Phase 2: bob the orbs and enforce the kill-together window
+      if (lobby.phase === 2) {
+        for (const orb of lobby.orbs) {
+          orb.y = orb.baseY + Math.sin(now / 400 + orb.id * Math.PI) * 15;
+        }
+
+        const dead = lobby.orbs.filter(o => o.hp <= 0);
+        if (dead.length === 1 && now - dead[0].deadAt > ORB_KILL_WINDOW) {
+          dead[0].hp = dead[0].maxHp;
+          dead[0].deadAt = null;
+          bossSay(lobby, 'you must strike them down together!');
+        }
       }
-      lobby.boss.x = Math.max(CHASE_BOUNDS.xMin, Math.min(CHASE_BOUNDS.xMax, lobby.boss.x));
-      lobby.boss.y = Math.max(CHASE_BOUNDS.yMin, Math.min(CHASE_BOUNDS.yMax, lobby.boss.y));
 
-      if (now - chase.lastAimedShot > lobby.encounter.aimedShotInterval) {
-        chase.lastAimedShot = now;
-        const targets = Object.values(lobby.players)
-          .filter(p => !p.dead)
-          .map(p => ({ x: t(p.x), y: t(p.y) }));
-        if (targets.length > 0) {
-          lobbyBroadcast(lobby, serialize({
-            type: 'bossAimedShot',
-            origin: { x: t(lobby.boss.x), y: t(lobby.boss.y) },
-            targets,
-            speed: lobby.encounter.aimedBulletSpeed
-          }));
+      // Phase 3: the boss roams the arena toward a wandering waypoint and
+      // periodically fires shots aimed at each living player's current spot.
+      // Those shots don't home in after firing, so moving away from where you
+      // were when the volley fired is enough to dodge.
+      if (lobby.phase === 3 && lobby.chase) {
+        const chase = lobby.chase;
+        const dx = chase.waypoint.x - lobby.boss.x;
+        const dy = chase.waypoint.y - lobby.boss.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < CHASE_WAYPOINT_RADIUS) {
+          chase.waypoint = pickChaseWaypoint();
+        } else {
+          lobby.boss.x += (dx / dist) * lobby.encounter.chaseSpeed * dt;
+          lobby.boss.y += (dy / dist) * lobby.encounter.chaseSpeed * dt;
+        }
+        lobby.boss.x = Math.max(CHASE_BOUNDS.xMin, Math.min(CHASE_BOUNDS.xMax, lobby.boss.x));
+        lobby.boss.y = Math.max(CHASE_BOUNDS.yMin, Math.min(CHASE_BOUNDS.yMax, lobby.boss.y));
+
+        if (now - chase.lastAimedShot > lobby.encounter.aimedShotInterval) {
+          chase.lastAimedShot = now;
+          const targets = Object.values(lobby.players)
+            .filter(p => !p.dead)
+            .map(p => ({ x: t(p.x), y: t(p.y) }));
+          if (targets.length > 0) {
+            lobbyBroadcast(lobby, serialize({
+              type: 'bossAimedShot',
+              origin: { x: t(lobby.boss.x), y: t(lobby.boss.y) },
+              targets,
+              speed: lobby.encounter.aimedBulletSpeed
+            }));
+          }
         }
       }
     }
@@ -655,7 +701,8 @@ function gameLoop() {
       })),
       boss: { x: t(lobby.boss.x), y: t(lobby.boss.y), hp: lobby.boss.hp, maxHp: lobby.boss.maxHp },
       phase: lobby.phase,
-      orbs: publicOrbs(lobby)
+      orbs: publicOrbs(lobby),
+      paused: lobby.paused
     }));
   }
 }

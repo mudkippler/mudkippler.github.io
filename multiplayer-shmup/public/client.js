@@ -1,7 +1,7 @@
 import { draw } from './renderer.js';
 import { updateHUD } from './hud.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
-import { circularAttack, bigRedBallAttack } from './attacks.js';
+import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack } from './attacks.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -51,6 +51,7 @@ let isHost = false;
 let inGame = false; // true once the host has started the encounter
 let encounter = DEFAULT_ENCOUNTER;
 let isDead = false;
+let paused = false; // host-toggled; freezes movement/combat, server still broadcasts state
 let players = {};
 let boss = {};
 let phase = 1; // 1: boss, 2: twin orbs, 3: enrage chase, 4: defeated (authoritative from server)
@@ -183,6 +184,28 @@ document.getElementById('restart-btn').addEventListener('click', () => {
     send({ type: 'restartGame' });
 });
 
+document.getElementById('pause-btn').addEventListener('click', () => {
+    send({ type: 'togglePause' });
+});
+
+document.getElementById('change-boss-btn').addEventListener('click', () => {
+    const encounterId = document.getElementById('change-encounter-select').value;
+    send({ type: 'restartGame', encounterId });
+});
+
+// Visible only to the host, only once the fight is underway.
+function updateHostControls() {
+    document.getElementById('host-controls').style.display = (inGame && isHost) ? 'flex' : 'none';
+    document.getElementById('change-encounter-select').value = encounter.id;
+}
+
+function updatePauseUI() {
+    const btn = document.getElementById('pause-btn');
+    btn.textContent = paused ? 'Resume' : 'Pause';
+    btn.classList.toggle('active', paused);
+    document.getElementById('pause-banner').style.display = paused ? 'block' : 'none';
+}
+
 document.getElementById('copy-link-btn').addEventListener('click', () => {
     const link = document.getElementById('invite-link');
     const btn = document.getElementById('copy-link-btn');
@@ -246,6 +269,7 @@ function connect() {
             phase = data.phase || 1;
             orbs = data.orbs || [];
             inGame = data.started;
+            paused = data.paused || false;
 
             // Make the current URL shareable/refreshable
             history.replaceState(null, '', inviteLink(lobbyCode));
@@ -255,6 +279,8 @@ function connect() {
             } else {
                 showLobbyScreen();
             }
+            updateHostControls();
+            updatePauseUI();
             return;
         }
 
@@ -270,12 +296,29 @@ function connect() {
             encounter = { ...encounter, ...data.encounter };
             updateLobbyPlayerList(data.players, data.hostId);
             if (!inGame) showLobbyScreen(); // refresh host controls if host changed
+            updateHostControls();
             return;
         }
 
         if (data.type === 'gameStart') {
             inGame = true;
             hideOverlays();
+            updateHostControls();
+            return;
+        }
+
+        if (data.type === 'encounterChanged') {
+            // Host restarted with a (possibly different) boss mid-fight: swap
+            // in the new attack config and drop anything from the old fight
+            // that's purely client-local (the server's own state resets ride
+            // in on the next 'state' broadcast).
+            encounter = data.encounter;
+            bullets = [];
+            allyBullets = [];
+            bossBullets = [];
+            lastBossAttack = 0;
+            bossAngleOffset = 0;
+            updateHostControls();
             return;
         }
 
@@ -323,6 +366,11 @@ function connect() {
             document.getElementById('victory-banner').style.display = phase === 4 ? 'block' : 'none';
             document.getElementById('restart-btn').style.display = phase === 4 && isHost ? 'inline-block' : 'none';
             document.getElementById('victory-waiting').style.display = phase === 4 && !isHost ? 'block' : 'none';
+
+            if (data.paused !== undefined && data.paused !== paused) {
+                paused = data.paused;
+                updatePauseUI();
+            }
             return;
         }
 
@@ -614,10 +662,25 @@ function updateLocalCombat(now, myPos, alive) {
         }
     } else if (boss.x !== undefined && now - lastBossAttack > encounter.attackRate) {
         lastBossAttack = now;
-        circularAttack(boss, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
-        bossAngleOffset += 0.1;
-        if (Math.random() < encounter.bigRedChance) {
-            bigRedBallAttack(boss, bossBullets);
+        // Each encounter has its own signature bullet pattern; 'ring' (the
+        // classic rotating circle + occasional big red ball) is the default.
+        switch (encounter.pattern) {
+            case 'spiral':
+                spiralAttack(boss, bossBullets, bossAngleOffset, encounter.arms, encounter.bulletSpeed);
+                bossAngleOffset += 0.23;
+                break;
+            case 'wave':
+                waveAttack(boss, bossBullets, now, encounter.bulletSpeed, encounter.fanCount);
+                break;
+            case 'rain':
+                rainAttack(bossBullets, encounter.bulletSpeed, encounter.drops);
+                break;
+            default:
+                circularAttack(boss, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
+                bossAngleOffset += 0.1;
+                if (Math.random() < encounter.bigRedChance) {
+                    bigRedBallAttack(boss, bossBullets);
+                }
         }
     }
 
@@ -706,7 +769,7 @@ function gameLoop() {
     if (!myPos && players[myId]) {
         myPos = { x: players[myId].x, y: players[myId].y };
     }
-    if (inGame && !isDead) {
+    if (inGame && !isDead && !paused) {
         updateLocalMovement(dt);
     }
 
@@ -719,7 +782,7 @@ function gameLoop() {
     });
 
     const me = interpolatedPlayers.find(p => p.id === myId);
-    if (inGame) {
+    if (inGame && !paused) {
         // Runs even while dead so the boss fight keeps animating for spectators;
         // the `alive` flag inside just gates shooting and taking damage.
         updateLocalCombat(now, me, !isDead);

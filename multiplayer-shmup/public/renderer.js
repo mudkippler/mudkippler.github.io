@@ -169,23 +169,20 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
     }
     ctx.globalAlpha = 1;
 
-    // Boss Bullets
+    // Boss Bullets — one color/size per attack type so patterns read distinctly
+    const BULLET_STYLES = {
+        1: { color: 'cyan', size: 6 },        // circular ring
+        2: { color: 'red', size: 20 },        // big red ball
+        3: { color: 'orange', size: 8 },      // phase-3 aimed shots
+        4: { color: 'magenta', size: 5 },     // spiral arms
+        5: { color: 'gold', size: 5 },        // sweeping wave fan
+        6: { color: 'greenyellow', size: 5 }  // acid rain droplets
+    };
     for (const b of bossBullets) {
-        let color;
-        let size;
-        if (b.type === 1) {
-            color = 'cyan';
-            size = 6;
-        } else if (b.type === 2) {
-            color = 'red';
-            size = 20;
-        } else if (b.type === 3) {
-            color = 'orange'; // phase-3 aimed shots — distinct from the ring pattern
-            size = 8;
-        }
-        ctx.fillStyle = color;
+        const style = BULLET_STYLES[b.type] || { color: 'white', size: b.size || 5 };
+        ctx.fillStyle = style.color;
         ctx.beginPath();
-        ctx.arc(b.x, b.y, size, 0, Math.PI * 2);
+        ctx.arc(b.x, b.y, style.size, 0, Math.PI * 2);
         ctx.fill();
     }
 
