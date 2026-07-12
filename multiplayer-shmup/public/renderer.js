@@ -1,24 +1,43 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+// Small tombstone icon marking a resurrectable (currently-dead) player.
+function drawGravestone(x, y, color) {
+    const w = 16, h = 18;
+    ctx.fillStyle = '#999';
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y + h / 2);
+    ctx.lineTo(x - w / 2, y - h / 2 + 5);
+    ctx.quadraticCurveTo(x - w / 2, y - h / 2, x - w / 2 + 5, y - h / 2);
+    ctx.lineTo(x + w / 2 - 5, y - h / 2);
+    ctx.quadraticCurveTo(x + w / 2, y - h / 2, x + w / 2, y - h / 2 + 5);
+    ctx.lineTo(x + w / 2, y + h / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Engraved cross
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y - h / 2 + 6);
+    ctx.lineTo(x, y + 3);
+    ctx.moveTo(x - 3, y - 3);
+    ctx.lineTo(x + 3, y - 3);
+    ctx.stroke();
+
+    // Color accent identifying whose body this is
+    ctx.fillStyle = color;
+    ctx.fillRect(x - w / 2, y + h / 2 - 3, w, 3);
+}
+
 export function draw(myId, players, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Grave markers (small crosses where players have died)
-    if (graves) {
-        const GRAVE_SIZE = 6;
-        ctx.lineWidth = 2;
-        for (const g of graves) {
-            ctx.strokeStyle = g.color;
-            ctx.beginPath();
-            ctx.moveTo(g.x - GRAVE_SIZE, g.y - GRAVE_SIZE);
-            ctx.lineTo(g.x + GRAVE_SIZE, g.y + GRAVE_SIZE);
-            ctx.moveTo(g.x + GRAVE_SIZE, g.y - GRAVE_SIZE);
-            ctx.lineTo(g.x - GRAVE_SIZE, g.y + GRAVE_SIZE);
-            ctx.stroke();
-        }
-        ctx.lineWidth = 1;
-    }
+    // Old permanent grave markers are hidden for now — death is revivable,
+    // so a gravestone is drawn at each currently-dead player instead (below).
 
     // Boss
     ctx.fillStyle = 'gray';
@@ -79,26 +98,8 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
     const PLAYER_RADIUS = 10;
 
     for (const p of players) {
-        // Dead players linger as faded bodies waiting to be revived
-        if (p.dead) ctx.globalAlpha = 0.35;
-
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
-        ctx.fill();
-
         if (p.dead) {
-            // Cross over the body
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(p.x - 5, p.y - 5);
-            ctx.lineTo(p.x + 5, p.y + 5);
-            ctx.moveTo(p.x + 5, p.y - 5);
-            ctx.lineTo(p.x - 5, p.y + 5);
-            ctx.stroke();
-            ctx.lineWidth = 1;
-            ctx.globalAlpha = 1;
+            drawGravestone(p.x, p.y, p.color);
 
             // Revive progress ring while a teammate stands on the body
             if (p.revive > 0) {
@@ -109,7 +110,21 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
                 ctx.stroke();
                 ctx.lineWidth = 1;
             }
+
+            if (p.name) {
+                ctx.font = '12px calibri';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#aaa';
+                ctx.fillText(p.name, p.x, p.y - 26);
+                ctx.textAlign = 'left';
+            }
+            continue;
         }
+
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
 
         // Name tag
         if (p.name) {
@@ -120,16 +135,13 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
             ctx.textAlign = 'left';
         }
 
-        if (!p.dead) {
-            // Health bar
-            const healthPercentage = p.health / 100;
-            const hue = healthPercentage * 120;
-            ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
-            ctx.fillRect(p.x - 15, p.y - 20, 30 * healthPercentage, 5);
-            ctx.strokeStyle = 'black';
-            ctx.strokeRect(p.x - 15, p.y - 20, 30, 5);
-        }
-        ctx.globalAlpha = 1;
+        // Health bar
+        const healthPercentage = p.health / 100;
+        const hue = healthPercentage * 120;
+        ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+        ctx.fillRect(p.x - 15, p.y - 20, 30 * healthPercentage, 5);
+        ctx.strokeStyle = 'black';
+        ctx.strokeRect(p.x - 15, p.y - 20, 30, 5);
     }
 
     // Bullets (always the local player's — bullets are simulated client-side only)

@@ -458,9 +458,9 @@ function updateAllyBullets() {
     }
 }
 
-function updateLocalCombat(now, myPos) {
-    // Fire local bullets
-    if (myPos && (movementKeys[' '] || movementKeys['Space']) && now - lastShot > PLAYER_SHOT_COOLDOWN) {
+function updateLocalCombat(now, myPos, alive) {
+    // Fire local bullets (dead players can't shoot, but keep spectating)
+    if (alive && myPos && (movementKeys[' '] || movementKeys['Space']) && now - lastShot > PLAYER_SHOT_COOLDOWN) {
         lastShot = now;
         bullets.push({
             id: bulletIdCounter++,
@@ -474,7 +474,8 @@ function updateLocalCombat(now, myPos) {
     }
 
     // Local boss attack simulation (cosmetic/local only, not synced across
-    // clients). Attack rate/pattern comes from the lobby's chosen encounter.
+    // clients). Runs regardless of `alive` so a dead/spectating player still
+    // sees the fight play out. Attack rate/pattern comes from the encounter.
     if (phase === 3) {
         bossBullets.length = 0; // defeated boss stops shooting immediately
     } else if (phase === 2) {
@@ -524,13 +525,15 @@ function updateLocalCombat(now, myPos) {
         }
     }
 
-    // Update + collide boss bullets against the local player
+    // Update + collide boss bullets against the local player. Bullets keep
+    // moving even while dead (so spectating looks right), they just pass
+    // through a dead/invulnerable body instead of being consumed by it.
     for (let i = bossBullets.length - 1; i >= 0; i--) {
         const b = bossBullets[i];
         b.x += b.dx;
         b.y += b.dy;
 
-        if (myPos) {
+        if (alive && myPos) {
             const dist = Math.hypot(b.x - myPos.x, b.y - myPos.y);
             if (dist < b.size + PLAYER_RADIUS - 5) {
                 addDamagePopup(b.x, b.y, -10, 'red');
@@ -591,11 +594,11 @@ function gameLoop() {
     });
 
     const me = interpolatedPlayers.find(p => p.id === myId);
-    if (inGame && !isDead) {
-        updateLocalCombat(now, me);
-    }
     if (inGame) {
-        updateAllyBullets(); // runs even while dead, so spectating shows the fight
+        // Runs even while dead so the boss fight keeps animating for spectators;
+        // the `alive` flag inside just gates shooting and taking damage.
+        updateLocalCombat(now, me, !isDead);
+        updateAllyBullets();
     }
 
     draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage);

@@ -44,6 +44,9 @@ const SHOT_RELAY_MIN_INTERVAL = 150; // ms, just under the client's fire cooldow
 // resets after a short pause so the lobby isn't stuck.
 const REVIVE_RADIUS = 30; // px
 const REVIVE_TIME = 3000; // ms of continuous overlap
+// Stepping off the body doesn't instantly forfeit progress — it drains at a
+// fraction of the fill rate, so a brief interruption isn't a full restart.
+const REVIVE_DECAY_MULTIPLIER = 0.4;
 const REVIVE_HEALTH = 50; // revived players come back at half health
 const TEAM_WIPE_RESET_DELAY = 4000; // ms
 const NAME_MAX_LENGTH = 16;
@@ -82,7 +85,33 @@ const ENCOUNTERS = {
   }
 };
 
+// 20 hand-picked hues, spread far apart in hue/lightness so adjacent players
+// are easy to tell apart at a glance. Avoids gray (the boss) and violet
+// (the orbs) to keep those readable as distinct entities.
+const PLAYER_COLORS = [
+  '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
+  '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990',
+  '#dcbeff', '#9a6324', '#fffac8', '#800000', '#aaffc3',
+  '#ffd8b1', '#ff6347', '#7fffd4', '#ff69b4', '#1e90ff'
+];
+
 const lobbies = {}; // code -> lobby
+
+function assignColorIndex(lobby) {
+  const used = new Set(Object.values(lobby.players).map(p => p.colorIndex));
+  for (let i = 0; i < PLAYER_COLORS.length; i++) {
+    if (!used.has(i)) return i;
+  }
+  // More players than colors shouldn't happen (LOBBY_MAX_PLAYERS < 20), but
+  // fall back to cycling rather than crashing.
+  return Object.keys(lobby.players).length % PLAYER_COLORS.length;
+}
+
+// Players always spawn at the bottom-center of the 800x600 arena, clear of
+// the boss up near the top, with a little jitter so they don't fully stack.
+function spawnPosition() {
+  return { x: 350 + Math.random() * 100, y: 540 + Math.random() * 40 };
+}
 
 // Codes avoid ambiguous characters (0/O, 1/I/L) since they're shared verbally.
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -164,15 +193,19 @@ function joinLobby(ws, lobby, rawName) {
   const id = playerIdCounter;
   playerIdCounter++;
 
+  const colorIndex = assignColorIndex(lobby);
+  const spawn = spawnPosition();
+
   const player = {
     id,
     ws,
     name: sanitizeName(rawName),
-    x: Math.random() * 800,
-    y: Math.random() * 600,
+    x: spawn.x,
+    y: spawn.y,
     vx: 0,
     vy: 0,
-    color: `hsl(${t(Math.random() * 360)}, 100%, 50%)`,
+    colorIndex,
+    color: PLAYER_COLORS[colorIndex],
     keys: {},
     lastActive: Date.now(),
     lastDamageReport: 0,
@@ -397,11 +430,12 @@ function gameLoop() {
       lobby.orbs = [];
       for (const id in lobby.players) {
         const p = lobby.players[id];
+        const spawn = spawnPosition();
         p.dead = false;
         p.health = 100;
         p.reviveProgress = 0;
-        p.x = Math.random() * 800;
-        p.y = Math.random() * 600;
+        p.x = spawn.x;
+        p.y = spawn.y;
         p.keys = {};
       }
       bossSay(lobby, 'back for another beating?');
@@ -448,7 +482,7 @@ function gameLoop() {
           if (d.ws && d.ws.readyState === WebSocket.OPEN) d.ws.send(serialize({ type: 'revived' }));
         }
       } else {
-        d.reviveProgress = 0;
+        d.reviveProgress = Math.max(0, d.reviveProgress - (1000 / TICK_RATE) * REVIVE_DECAY_MULTIPLIER);
       }
     }
 
