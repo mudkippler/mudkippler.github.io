@@ -97,8 +97,11 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
 
     // Players
     const PLAYER_RADIUS = 10;
+    const OTHER_PLAYER_ALPHA = 0.5; // teammates render less prominently than you
 
     for (const p of players) {
+        ctx.globalAlpha = p.id === myId ? 1 : OTHER_PLAYER_ALPHA;
+
         if (p.dead) {
             drawGravestone(p.x, p.y, p.color);
 
@@ -144,6 +147,7 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
         ctx.strokeStyle = 'black';
         ctx.strokeRect(p.x - 15, p.y - 20, 30, 5);
     }
+    ctx.globalAlpha = 1;
 
     // Bullets (always the local player's — bullets are simulated client-side only)
     const me = players.find(p => p.id === myId);
@@ -154,8 +158,9 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
         ctx.fill();
     }
 
-    // Ally bullets (relayed shot origins, simulated locally), slightly faded
-    ctx.globalAlpha = 0.75;
+    // Ally bullets (relayed shot origins, simulated locally) render less
+    // prominently than the local player's own bullets
+    ctx.globalAlpha = 0.45;
     for (const b of allyBullets) {
         ctx.fillStyle = b.color || 'white';
         ctx.beginPath();

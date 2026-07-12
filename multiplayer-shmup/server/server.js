@@ -40,6 +40,7 @@ const TICK_RATE = 15;
 // (which scales by requestAnimationFrame's real dt). That drift is what
 // every other player would see as a desynced position.
 const PLAYER_SPEED_PER_SEC = 150; // matches the client's prediction speed
+const PLAYER_BULLET_SPEED = 5; // matches the client's bullet speed, used to clamp relayed aim vectors
 const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report arbitrary damage
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
 const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
@@ -275,6 +276,8 @@ function joinLobby(ws, lobby, rawName) {
     lastDamageReport: 0,
     lastChat: 0,
     lastShotRelay: 0,
+    lastPosReport: 0, // ms timestamp of the last accepted client position report
+
     health: 100,
     dead: false,
     reviveProgress: 0 // ms a living teammate has spent standing on this body
@@ -365,6 +368,31 @@ wss.on('connection', (ws) => {
       } else if (data.type === 'movementUpdate') {
         player.keys = { ...player.keys, ...data.keys };
         player.lastActive = Date.now();
+
+        // The client reports its own predicted position and we adopt it, so
+        // the player's ship never has to be corrected on their own screen
+        // (reconciliation tug was visible as pixel drift). The report is
+        // sanity-checked against max movement speed so a hacked client can't
+        // teleport: a rejected report keeps the server's copy, which also
+        // covers the race right after a server-side respawn teleport (stale
+        // in-flight reports from the old spot get rejected until the client
+        // snaps to the new position).
+        if (!player.dead && Number.isFinite(data.x) && Number.isFinite(data.y)) {
+          const now = Date.now();
+          // Allowance accrues since the last *accepted* report (capped), so a
+          // single rejected/lost packet doesn't cascade into rejecting every
+          // subsequent report, while a genuine teleport stays out of reach of
+          // the cap forever.
+          const elapsed = Math.min((now - player.lastPosReport) / 1000, 0.5);
+          const maxDist = PLAYER_SPEED_PER_SEC * elapsed * 1.5 + 2;
+          const nx = Math.max(0, Math.min(800, data.x));
+          const ny = Math.max(0, Math.min(600, data.y));
+          if (Math.hypot(nx - player.x, ny - player.y) <= maxDist) {
+            player.x = nx;
+            player.y = ny;
+            player.lastPosReport = now;
+          }
+        }
       } else if (data.type === 'bossDamage') {
         // Damageable in phase 1 (main fight) and phase 3 (enrage chase);
         // invulnerable during the orb phase and once already defeated.
@@ -434,8 +462,8 @@ wss.on('connection', (ws) => {
           }
         }
       } else if (data.type === 'shot') {
-        // Relay the shot origin to teammates so they can render ally bullets
-        // locally. Trajectory is implied (bullets always travel straight up).
+        // Relay the shot origin and aim direction to teammates so they can
+        // render ally bullets locally.
         if (!lobby.started || player.dead) return;
         const now = Date.now();
         if (now - player.lastShotRelay < SHOT_RELAY_MIN_INTERVAL) return;
@@ -443,7 +471,19 @@ wss.on('connection', (ws) => {
 
         const x = Math.max(0, Math.min(800, Number(data.x) || 0));
         const y = Math.max(0, Math.min(600, Number(data.y) || 0));
-        const shotMessage = serialize({ type: 'shot', id: ws.id, x: t(x), y: t(y), color: player.color });
+
+        // Clamp the reported aim vector's magnitude so a client can't relay
+        // an unrealistically fast-looking bullet to teammates.
+        let dx = Number(data.dx) || 0;
+        let dy = Number(data.dy);
+        if (!Number.isFinite(dy)) dy = -PLAYER_BULLET_SPEED;
+        const speed = Math.hypot(dx, dy) || 1;
+        if (speed > PLAYER_BULLET_SPEED) {
+          dx = (dx / speed) * PLAYER_BULLET_SPEED;
+          dy = (dy / speed) * PLAYER_BULLET_SPEED;
+        }
+
+        const shotMessage = serialize({ type: 'shot', id: ws.id, x: t(x), y: t(y), dx: t(dx), dy: t(dy), color: player.color });
         for (const pid in lobby.players) {
           if (Number(pid) === ws.id) continue; // shooter already renders its own bullet
           const peer = lobby.players[pid].ws;
@@ -510,6 +550,13 @@ function gameLoop() {
     for (const id in lobby.players) {
       const p = lobby.players[id];
       if (p.dead) continue;
+
+      // Players who report their own predicted position (real clients) are
+      // authoritative for it — simulating keys on top would fight the
+      // reports and jitter. Key-based simulation remains as the fallback
+      // for clients that only send keys (e.g. the test harness).
+      if (now - (p.lastPosReport || 0) < 400) continue;
+
       p.vx = 0;
       p.vy = 0;
       if (p.keys['ArrowUp'] || p.keys['w']) p.vy -= 1;

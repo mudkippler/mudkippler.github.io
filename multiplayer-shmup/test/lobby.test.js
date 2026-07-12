@@ -31,7 +31,7 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   other.send({ type: 'createLobby', name: 'Carol', encounter: 'twin' });
   const oJoined = await other.waitFor('joined');
   check(oJoined.code !== joined.code, 'second lobby has a different code');
-  check(oJoined.encounter.id === 'twin' && oJoined.boss.maxHp === 5000, 'second lobby has its own encounter');
+  check(oJoined.encounter.id === 'twin' && oJoined.boss.maxHp === 2500, 'second lobby has its own encounter');
 
   // Non-host cannot start; host can
   friend.send({ type: 'startGame' });

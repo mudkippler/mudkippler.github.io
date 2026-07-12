@@ -32,13 +32,13 @@ const ORB_RADIUS = 18; // collision/render size for the phase-2 orbs
 const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 const BOSS_MESSAGE_DURATION = 4000; // ms boss speech stays on screen
 
-// Reconciliation for our own predicted position against the server's
-// authoritative copy: below this we don't bother (rounding/interpolation
-// noise), above SNAP we assume something discontinuous happened (revive,
-// clamp) and jump straight there instead of visibly sliding.
-const RECONCILE_DEADZONE = 3; // px
+// The client is authoritative for its own position: movementUpdate reports
+// our predicted position and the server adopts it (with a speed sanity
+// check), so there is no continuous reconciliation that could nudge the ship
+// when we aren't pressing anything. The one exception is a server-side
+// teleport (encounter reset moving everyone back to spawn): if the server's
+// copy is discontinuously far from our prediction, snap to it.
 const RECONCILE_SNAP = 80; // px
-const RECONCILE_RATE = 0.15; // fraction of the gap closed per state update
 
 // Fallback attack parameters; overwritten by the encounter config the server
 // sends on join. Attack rate/pattern is what differentiates encounters.
@@ -96,6 +96,16 @@ const lobbyScreenEl = document.getElementById('lobby-screen');
 const menuErrorEl = document.getElementById('menu-error');
 const playerNameInput = document.getElementById('player-name');
 const joinCodeInput = document.getElementById('join-code');
+
+// Mouse position in canvas space, used to aim the local player's shots.
+// Defaults to straight up until the mouse first moves over the canvas.
+const canvasEl = document.getElementById('game');
+let mouseX = 400, mouseY = 0;
+canvasEl.addEventListener('mousemove', e => {
+    const rect = canvasEl.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    mouseY = (e.clientY - rect.top) * (canvasEl.height / rect.height);
+});
 
 function inviteLink(code) {
     return `${location.origin}${location.pathname}?lobby=${code}`;
@@ -175,12 +185,28 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 
 document.getElementById('copy-link-btn').addEventListener('click', () => {
     const link = document.getElementById('invite-link');
-    link.select();
-    navigator.clipboard.writeText(link.value).then(() => {
-        const btn = document.getElementById('copy-link-btn');
+    const btn = document.getElementById('copy-link-btn');
+
+    const showCopied = () => {
         btn.textContent = 'Copied!';
         setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-    });
+    };
+
+    // navigator.clipboard requires a secure context and can silently reject
+    // (e.g. plain-HTTP deployments), which used to leave the clipboard holding
+    // whatever was copied there before — pasting a stale/unrelated link instead
+    // of this lobby's. Fall back to the older execCommand path in that case.
+    const legacyCopy = () => {
+        link.select();
+        document.execCommand('copy');
+        showCopied();
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link.value).then(showCopied, legacyCopy);
+    } else {
+        legacyCopy();
+    }
 });
 
 // Don't let typing in menu inputs drive the ship
@@ -276,26 +302,22 @@ function connect() {
                 document.getElementById('death-screen').style.display = 'none';
             }
 
-            // Reconcile our own predicted position against the server's
-            // authoritative copy. Prediction should track the server closely
-            // now that both scale movement by real elapsed time, but this
-            // guards against residual drift from dropped movementUpdate
-            // packets or reconnects rather than letting it accumulate forever.
+            // The server adopts our reported position, so no continuous
+            // reconciliation is needed — our ship only ever moves from our own
+            // inputs. The single exception: a discontinuously large gap means
+            // the server teleported us (encounter reset to spawn), so snap.
             if (myPos && players[myId]) {
                 const server = players[myId];
-                const dx = server.x - myPos.x;
-                const dy = server.y - myPos.y;
-                const dist = Math.hypot(dx, dy);
-                if (dist > RECONCILE_SNAP) {
+                if (Math.hypot(server.x - myPos.x, server.y - myPos.y) > RECONCILE_SNAP) {
                     myPos.x = server.x;
                     myPos.y = server.y;
-                } else if (dist > RECONCILE_DEADZONE) {
-                    myPos.x += dx * RECONCILE_RATE;
-                    myPos.y += dy * RECONCILE_RATE;
                 }
             }
 
             boss = { ...boss, ...data.boss };
+            // Host restarted after victory: the server teleported everyone
+            // back to spawn, so drop our prediction and re-snap to it.
+            if (phase === 4 && (data.phase || 1) === 1) myPos = null;
             phase = data.phase || 1;
             orbs = data.orbs || [];
             document.getElementById('victory-banner').style.display = phase === 4 ? 'block' : 'none';
@@ -327,8 +349,8 @@ function connect() {
 
         if (data.type === 'shot') {
             // A teammate fired: spawn their bullet locally from the relayed
-            // origin. Trajectory is implied — bullets travel straight up.
-            allyBullets.push({ x: data.x, y: data.y, dx: 0, dy: -PLAYER_BULLET_SPEED, color: data.color });
+            // origin, aimed the same direction they fired it.
+            allyBullets.push({ x: data.x, y: data.y, dx: data.dx ?? 0, dy: data.dy ?? -PLAYER_BULLET_SPEED, color: data.color });
             return;
         }
 
@@ -377,14 +399,25 @@ if (urlLobbyCode) {
 }
 showMenu();
 
-// Send movement keys state to server every 100ms (or server tick rate).
+function sendMovementUpdate() {
+    if (inGame && socket && socket.readyState === WebSocket.OPEN) {
+        // Report our predicted position — the server adopts it (after a speed
+        // sanity check) so our ship's position is client-authoritative and
+        // never needs correcting back on our own screen.
+        const msg = (myPos && !isDead)
+            ? { type: 'movementUpdate', keys: movementKeys, x: Math.round(myPos.x * 10) / 10, y: Math.round(myPos.y * 10) / 10 }
+            : { type: 'movementUpdate', keys: movementKeys };
+        send(msg);
+    }
+}
+
+// Send movement keys state to server every 100ms as a keepalive/repair for
+// dropped packets; key press/release changes are also pushed immediately
+// (see the keydown/keyup handlers) so the server's copy of our movement
+// trails our local prediction as little as possible.
 // A single interval survives across respawns/reconnects since `socket` is
 // re-pointed at the new connection by connect().
-setInterval(() => {
-    if (inGame && socket && socket.readyState === WebSocket.OPEN) {
-        send({ type: 'movementUpdate', keys: movementKeys });
-    }
-}, 100);
+setInterval(sendMovementUpdate, 100);
 
 const chatInput = document.getElementById('chat-input');
 const chatMessagesEl = document.getElementById('chat-messages');
@@ -424,7 +457,10 @@ document.addEventListener('keydown', e => {
     };
 
     if (movementKeysMap[e.key]) {
-        movementKeys[movementKeysMap[e.key]] = true;
+        if (!movementKeys[movementKeysMap[e.key]]) {
+            movementKeys[movementKeysMap[e.key]] = true;
+            sendMovementUpdate(); // push key changes right away, don't wait for the interval
+        }
     } else if (e.key === ' ' || e.code === 'Space') {
         movementKeys[' '] = true;
         if (inGame) e.preventDefault(); // don't scroll the page
@@ -442,10 +478,34 @@ document.addEventListener('keyup', e => {
     };
 
     if (movementKeysMap[e.key]) {
-        movementKeys[movementKeysMap[e.key]] = false;
+        if (movementKeys[movementKeysMap[e.key]]) {
+            movementKeys[movementKeysMap[e.key]] = false;
+            sendMovementUpdate(); // push key changes right away, don't wait for the interval
+        }
     } else if (e.key === ' ' || e.code === 'Space') {
         movementKeys[' '] = false;
     }
+});
+
+// If the window/tab loses focus while a movement key is held (alt-tab,
+// opening devtools, clicking another window), the browser never fires the
+// matching keyup — the key stays "stuck" true, so the player keeps drifting
+// in that direction (often horizontally, since a/d are the easiest to leave
+// pressed) even once the player thinks they've let go. Clear everything on
+// blur/hide and push the change immediately instead of waiting for the next
+// 100ms movementUpdate tick.
+function clearMovementKeys() {
+    for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ']) {
+        movementKeys[key] = false;
+    }
+    if (inGame && socket && socket.readyState === WebSocket.OPEN) {
+        send({ type: 'movementUpdate', keys: movementKeys });
+    }
+}
+
+window.addEventListener('blur', clearMovementKeys);
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearMovementKeys();
 });
 
 function getInterpolatedPosition(entity, now) {
@@ -515,15 +575,24 @@ function updateLocalCombat(now, myPos, alive) {
     // Fire local bullets (dead players can't shoot, but keep spectating)
     if (alive && myPos && (movementKeys[' '] || movementKeys['Space']) && now - lastShot > PLAYER_SHOT_COOLDOWN) {
         lastShot = now;
+
+        // Aim at the mouse cursor; fall back to straight up if the cursor is
+        // exactly on top of the player (zero-length direction).
+        const aimDx = mouseX - myPos.x;
+        const aimDy = mouseY - myPos.y;
+        const aimDist = Math.hypot(aimDx, aimDy) || 1;
+        const dx = (aimDx / aimDist) * PLAYER_BULLET_SPEED;
+        const dy = (aimDy / aimDist) * PLAYER_BULLET_SPEED;
+
         bullets.push({
             id: bulletIdCounter++,
             x: myPos.x,
             y: myPos.y,
-            dx: 0,
-            dy: -PLAYER_BULLET_SPEED
+            dx,
+            dy
         });
-        // Tell teammates where the shot originated so they can render it
-        send({ type: 'shot', x: myPos.x, y: myPos.y });
+        // Tell teammates where the shot originated and its aim so they can render it
+        send({ type: 'shot', x: myPos.x, y: myPos.y, dx, dy });
     }
 
     // Local boss attack simulation (cosmetic/local only, not synced across
