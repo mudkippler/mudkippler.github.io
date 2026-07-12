@@ -53,7 +53,7 @@ let encounter = DEFAULT_ENCOUNTER;
 let isDead = false;
 let players = {};
 let boss = {};
-let phase = 1; // 1: boss, 2: twin orbs, 3: defeated (authoritative from server)
+let phase = 1; // 1: boss, 2: twin orbs, 3: enrage chase, 4: defeated (authoritative from server)
 let orbs = [];
 let bossMessage = null; // {text, expiresAt} — latest boss speech line
 let fullDamageLog = {};
@@ -298,9 +298,9 @@ function connect() {
             boss = { ...boss, ...data.boss };
             phase = data.phase || 1;
             orbs = data.orbs || [];
-            document.getElementById('victory-banner').style.display = phase === 3 ? 'block' : 'none';
-            document.getElementById('restart-btn').style.display = phase === 3 && isHost ? 'inline-block' : 'none';
-            document.getElementById('victory-waiting').style.display = phase === 3 && !isHost ? 'block' : 'none';
+            document.getElementById('victory-banner').style.display = phase === 4 ? 'block' : 'none';
+            document.getElementById('restart-btn').style.display = phase === 4 && isHost ? 'inline-block' : 'none';
+            document.getElementById('victory-waiting').style.display = phase === 4 && !isHost ? 'block' : 'none';
             return;
         }
 
@@ -329,6 +329,26 @@ function connect() {
             // A teammate fired: spawn their bullet locally from the relayed
             // origin. Trajectory is implied — bullets travel straight up.
             allyBullets.push({ x: data.x, y: data.y, dx: 0, dy: -PLAYER_BULLET_SPEED, color: data.color });
+            return;
+        }
+
+        if (data.type === 'bossAimedShot') {
+            // Phase-3 volley: each shot is aimed at where a player was standing
+            // the instant it fired, not a continuously homing missile — moving
+            // away from that spot before it arrives is enough to dodge.
+            for (const target of data.targets) {
+                const dx = target.x - data.origin.x;
+                const dy = target.y - data.origin.y;
+                const dist = Math.hypot(dx, dy) || 1;
+                bossBullets.push({
+                    x: data.origin.x,
+                    y: data.origin.y,
+                    dx: (dx / dist) * data.speed,
+                    dy: (dy / dist) * data.speed,
+                    type: 3,
+                    size: 8
+                });
+            }
             return;
         }
 
@@ -476,7 +496,7 @@ function updateAllyBullets() {
         b.y += b.dy;
 
         let hit = false;
-        if (phase === 1) {
+        if (phase === 1 || phase === 3) {
             hit = Math.hypot(b.x - boss.x, b.y - boss.y) < boss.radius;
         } else if (phase === 2) {
             hit = orbs.some(orb => orb.hp > 0 && Math.hypot(b.x - orb.x, b.y - orb.y) < ORB_RADIUS);
@@ -509,7 +529,10 @@ function updateLocalCombat(now, myPos, alive) {
     // Local boss attack simulation (cosmetic/local only, not synced across
     // clients). Runs regardless of `alive` so a dead/spectating player still
     // sees the fight play out. Attack rate/pattern comes from the encounter.
-    if (phase === 3) {
+    // Phase 3 (chase) falls through to the same ring pattern as phase 1 —
+    // it just now fires from wherever the roaming boss currently is — with
+    // the server separately relaying aimed shots via 'bossAimedShot'.
+    if (phase === 4) {
         bossBullets.length = 0; // defeated boss stops shooting immediately
     } else if (phase === 2) {
         // The orbs take over the shooting during the co-op phase
@@ -536,7 +559,7 @@ function updateLocalCombat(now, myPos, alive) {
         b.y += b.dy;
 
         let hit = false;
-        if (phase === 1) {
+        if (phase === 1 || phase === 3) {
             if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.radius) {
                 addDamagePopup(b.x, b.y, 10, players[myId]?.color || 'white');
                 send({ type: 'bossDamage' });
@@ -634,7 +657,7 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage, phase);
     updateHUD(myId, Object.values(players));
     updateDiagnostics();
     requestAnimationFrame(gameLoop);

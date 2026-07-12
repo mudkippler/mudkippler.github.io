@@ -33,14 +33,15 @@ function drawGravestone(x, y, color) {
     ctx.fillRect(x - w / 2, y + h / 2 - 3, w, 3);
 }
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage) {
+export function draw(myId, players, bullets, allyBullets, bossBullets, boss, fullDamageLog, damagePopups, graves, orbs, bossMessage, phase) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
 
-    // Boss
-    ctx.fillStyle = 'gray';
+    // Boss — tinted red during the phase-3 enrage chase as a readable signal
+    // that it's now mobile and firing aimed shots, not just standing still.
+    ctx.fillStyle = phase === 3 ? '#a33' : 'gray';
     ctx.beginPath();
     ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -173,6 +174,9 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, ful
         } else if (b.type === 2) {
             color = 'red';
             size = 20;
+        } else if (b.type === 3) {
+            color = 'orange'; // phase-3 aimed shots — distinct from the ring pattern
+            size = 8;
         }
         ctx.fillStyle = color;
         ctx.beginPath();

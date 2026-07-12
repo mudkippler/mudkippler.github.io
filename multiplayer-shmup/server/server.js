@@ -71,25 +71,44 @@ const EMPTY_LOBBY_TTL = 30000; // ms
 const ORB_MAX_HP = 300;
 const ORB_KILL_WINDOW = 3000; // ms
 
-// Encounter definitions. bossMaxHp/hasOrbPhase are authoritative here; the
-// attack fields are forwarded to clients, which simulate boss bullets locally.
+// Encounter definitions. bossMaxHp/hasOrbPhase/chase* are authoritative here;
+// the attack fields are forwarded to clients, which simulate boss bullets
+// locally. Every encounter ends with a phase-3 "enrage" chase: the boss
+// becomes mobile and periodically fires shots aimed at each living player's
+// current position (see startChasePhase / gameLoop), on top of its usual
+// ring pattern which keeps firing from wherever the boss currently is.
 const ENCOUNTERS = {
   twin: {
     id: 'twin', name: 'The Twin Guardian',
-    bossMaxHp: 5000, hasOrbPhase: true,
-    attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1
+    bossMaxHp: 500, hasOrbPhase: true,
+    attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1,
+    chaseMaxHp: 800, chaseSpeed: 70, aimedShotInterval: 1400, aimedBulletSpeed: 3.2
   },
   storm: {
     id: 'storm', name: 'Bullet Storm',
     bossMaxHp: 3500, hasOrbPhase: false,
-    attackRate: 70, numberOfAngles: 6, bulletSpeed: 1.2, bigRedChance: 0.2
+    attackRate: 70, numberOfAngles: 6, bulletSpeed: 1.2, bigRedChance: 0.2,
+    chaseMaxHp: 600, chaseSpeed: 90, aimedShotInterval: 1000, aimedBulletSpeed: 3.6
   },
   blitz: {
     id: 'blitz', name: 'Blitz',
     bossMaxHp: 1500, hasOrbPhase: false,
-    attackRate: 55, numberOfAngles: 4, bulletSpeed: 2, bigRedChance: 0.05
+    attackRate: 55, numberOfAngles: 4, bulletSpeed: 2, bigRedChance: 0.05,
+    chaseMaxHp: 300, chaseSpeed: 110, aimedShotInterval: 800, aimedBulletSpeed: 4.2
   }
 };
+
+// The boss wanders within these bounds during the chase phase — clear of the
+// bottom strip where players spawn/fight from and inset from the walls.
+const CHASE_BOUNDS = { xMin: 60, xMax: 740, yMin: 70, yMax: 430 };
+const CHASE_WAYPOINT_RADIUS = 20; // px; close enough counts as "arrived"
+
+function pickChaseWaypoint() {
+  return {
+    x: CHASE_BOUNDS.xMin + Math.random() * (CHASE_BOUNDS.xMax - CHASE_BOUNDS.xMin),
+    y: CHASE_BOUNDS.yMin + Math.random() * (CHASE_BOUNDS.yMax - CHASE_BOUNDS.yMin)
+  };
+}
 
 // 20 hand-picked hues, spread far apart in hue/lightness so adjacent players
 // are easy to tell apart at a glance. Avoids gray (the boss) and violet
@@ -145,8 +164,11 @@ function createLobby(encounterId) {
     wipeAt: null, // set when every player is dead; encounter resets shortly after
     players: {},
     boss: { x: 400, y: 100, radius: 30, hp: encounter.bossMaxHp, maxHp: encounter.bossMaxHp },
-    phase: 1, // 1: boss health bar, 2: twin orbs (co-op check), 3: defeated
+    // 1: boss health bar, 2: twin orbs (co-op check, twin only), 3: enrage
+    // chase (mobile boss + aimed shots), 4: defeated
+    phase: 1,
     orbs: [], // {id, baseX, baseY, x, y, hp, maxHp, deadAt}
+    chase: null, // {waypoint: {x,y}, lastAimedShot} — set on entering phase 3
     damageLog: {}, // id -> {name, color, dmg}
     graves: [] // {x, y, color} markers left where players have died
   };
@@ -185,9 +207,13 @@ function broadcastLobbyState(lobby) {
 // team-wipe recovery and a host-triggered restart after victory.
 function resetEncounter(lobby) {
   lobby.wipeAt = null;
+  lobby.boss.x = 400;
+  lobby.boss.y = 100;
+  lobby.boss.maxHp = lobby.encounter.bossMaxHp; // chase phase may have shrunk this
   lobby.boss.hp = lobby.boss.maxHp;
   lobby.phase = 1;
   lobby.orbs = [];
+  lobby.chase = null;
   for (const id in lobby.players) {
     const p = lobby.players[id];
     const spawn = spawnPosition();
@@ -208,6 +234,18 @@ function startPhase2(lobby) {
     return { id: i, baseX: x, baseY: y, x, y, hp: ORB_MAX_HP, maxHp: ORB_MAX_HP, deadAt: null };
   });
   bossSay(lobby, "i'm just getting started..");
+}
+
+// Phase 3: the boss's last stand. It gets a fresh HP pool, starts roaming
+// the arena instead of sitting still, and periodically fires shots aimed at
+// each living player's position on top of its usual ring pattern.
+function startChasePhase(lobby, taunt) {
+  lobby.phase = 3;
+  lobby.orbs = [];
+  lobby.boss.maxHp = lobby.encounter.chaseMaxHp;
+  lobby.boss.hp = lobby.encounter.chaseMaxHp;
+  lobby.chase = { waypoint: pickChaseWaypoint(), lastAimedShot: Date.now() };
+  bossSay(lobby, taunt);
 }
 
 function sanitizeName(raw) {
@@ -321,14 +359,16 @@ wss.on('connection', (ws) => {
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
       } else if (data.type === 'restartGame') {
-        if (ws.id !== lobby.hostId || lobby.phase !== 3) return;
+        if (ws.id !== lobby.hostId || lobby.phase !== 4) return;
         resetEncounter(lobby);
         bossSay(lobby, 'back for another beating?');
       } else if (data.type === 'movementUpdate') {
         player.keys = { ...player.keys, ...data.keys };
         player.lastActive = Date.now();
       } else if (data.type === 'bossDamage') {
-        if (!lobby.started || lobby.phase !== 1) return; // boss is invulnerable once the orbs are out
+        // Damageable in phase 1 (main fight) and phase 3 (enrage chase);
+        // invulnerable during the orb phase and once already defeated.
+        if (!lobby.started || (lobby.phase !== 1 && lobby.phase !== 3)) return;
         const now = Date.now();
         if (now - player.lastDamageReport < DAMAGE_REPORT_MIN_INTERVAL) return;
         player.lastDamageReport = now;
@@ -337,11 +377,14 @@ wss.on('connection', (ws) => {
         lobby.damageLog[ws.id].dmg += BULLET_DAMAGE;
 
         if (lobby.boss.hp <= 0) {
-          if (lobby.encounter.hasOrbPhase) {
+          if (lobby.phase === 3) {
+            lobby.phase = 4;
+            lobby.chase = null;
+            bossSay(lobby, 'impossible... you actually got me...');
+          } else if (lobby.encounter.hasOrbPhase) {
             startPhase2(lobby);
           } else {
-            lobby.phase = 3;
-            bossSay(lobby, 'impossible... defeated...');
+            startChasePhase(lobby, "you think that's the end of me?!");
           }
         }
       } else if (data.type === 'orbDamage') {
@@ -359,8 +402,7 @@ wss.on('connection', (ws) => {
         if (orb.hp <= 0) {
           orb.deadAt = now;
           if (lobby.orbs.every(o => o.hp <= 0)) {
-            lobby.phase = 3;
-            bossSay(lobby, 'impossible... you struck as one...');
+            startChasePhase(lobby, 'impossible... you struck as one... but I am not finished!');
           }
         }
       } else if (data.type === 'playerDamage') {
@@ -520,6 +562,40 @@ function gameLoop() {
         dead[0].hp = dead[0].maxHp;
         dead[0].deadAt = null;
         bossSay(lobby, 'you must strike them down together!');
+      }
+    }
+
+    // Phase 3: the boss roams the arena toward a wandering waypoint and
+    // periodically fires shots aimed at each living player's current spot.
+    // Those shots don't home in after firing, so moving away from where you
+    // were when the volley fired is enough to dodge.
+    if (lobby.phase === 3 && lobby.chase) {
+      const chase = lobby.chase;
+      const dx = chase.waypoint.x - lobby.boss.x;
+      const dy = chase.waypoint.y - lobby.boss.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < CHASE_WAYPOINT_RADIUS) {
+        chase.waypoint = pickChaseWaypoint();
+      } else {
+        lobby.boss.x += (dx / dist) * lobby.encounter.chaseSpeed * dt;
+        lobby.boss.y += (dy / dist) * lobby.encounter.chaseSpeed * dt;
+      }
+      lobby.boss.x = Math.max(CHASE_BOUNDS.xMin, Math.min(CHASE_BOUNDS.xMax, lobby.boss.x));
+      lobby.boss.y = Math.max(CHASE_BOUNDS.yMin, Math.min(CHASE_BOUNDS.yMax, lobby.boss.y));
+
+      if (now - chase.lastAimedShot > lobby.encounter.aimedShotInterval) {
+        chase.lastAimedShot = now;
+        const targets = Object.values(lobby.players)
+          .filter(p => !p.dead)
+          .map(p => ({ x: t(p.x), y: t(p.y) }));
+        if (targets.length > 0) {
+          lobbyBroadcast(lobby, serialize({
+            type: 'bossAimedShot',
+            origin: { x: t(lobby.boss.x), y: t(lobby.boss.y) },
+            targets,
+            speed: lobby.encounter.aimedBulletSpeed
+          }));
+        }
       }
     }
 

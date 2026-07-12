@@ -5,7 +5,8 @@ const { check, finish, makeClient, sleep } = require('./helpers');
 (async () => {
   const host = makeClient('host');
   await host.open;
-  // 'blitz' has the lowest boss HP (1500) of the encounters, so it's cheap to defeat here.
+  // 'blitz' has the lowest HP of the encounters (1500 main + 300 chase), so
+  // it's cheapest to fully defeat here.
   host.send({ type: 'createLobby', name: 'Alice', encounter: 'blitz' });
   const joined = await host.waitFor('joined');
   host.id = joined.id;
@@ -20,37 +21,41 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   await friend.waitFor('gameStart');
   await host.waitFor('state');
 
-  // Defeat the boss: 1500 HP / 10 dmg per hit = 150 hits, well under the
-  // 50ms anti-spam window per hit.
-  for (let i = 0; i < 150; i++) {
+  // Defeat the boss all the way through: phase 1 (1500 HP) transitions into
+  // phase 3's enrage chase (another 300 HP) before finally reaching phase 4.
+  // bossDamage applies in both phase 1 and phase 3, so just keep firing.
+  let sawChasePhase = false;
+  for (let i = 0; i < 220; i++) {
     host.send({ type: 'bossDamage' });
     await sleep(55);
     const s = host.lastState();
-    if (s && s.phase === 3) break;
+    if (s && s.phase === 3) sawChasePhase = true;
+    if (s && s.phase === 4) break;
   }
   const victoryState = host.lastState();
-  check(victoryState.phase === 3, `boss defeated, phase is 3 (was ${victoryState.phase})`);
+  check(sawChasePhase, 'boss passed through the phase-3 enrage chase before dying');
+  check(victoryState.phase === 4, `boss fully defeated, phase is 4 (was ${victoryState.phase})`);
 
   // Non-host restart is ignored
   friend.send({ type: 'restartGame' });
   await sleep(300);
   let s = host.lastState();
-  check(s.phase === 3, 'non-host restartGame is ignored, still phase 3');
+  check(s.phase === 4, 'non-host restartGame is ignored, still phase 4');
 
   // Host restart resets the encounter
   host.send({ type: 'restartGame' });
   await sleep(300);
   s = host.lastState();
   check(s.phase === 1, `host restart resets phase back to 1 (was ${s.phase})`);
-  check(s.boss.hp === s.boss.maxHp, `host restart resets boss to full HP (${s.boss.hp}/${s.boss.maxHp})`);
+  check(s.boss.hp === s.boss.maxHp && s.boss.maxHp === 1500, `host restart resets boss to full main-phase HP (${s.boss.hp}/${s.boss.maxHp})`);
   check(s.players.every(p => !p.dead && p.health === 100), 'host restart brings every player back to full health');
 
-  // Restart is a no-op outside phase 3 (already tested implicitly: repeated
+  // Restart is a no-op outside phase 4 (already tested implicitly: repeated
   // damage now works again since the boss isn't defeated anymore)
   host.send({ type: 'bossDamage' });
   await sleep(200);
   s = host.lastState();
-  check(s.boss.hp === s.boss.maxHp - 10, `boss is damageable again after restart (hp=${s.boss.hp})`);
+  check(s.boss.hp === 1490, `boss is damageable again after restart (hp=${s.boss.hp})`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });
