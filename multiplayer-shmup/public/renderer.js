@@ -84,6 +84,15 @@ export function draw(myId, players, bullets, bossBullets, boss, fullDamageLog, d
         ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
         ctx.fill();
 
+        // Name tag
+        if (p.name) {
+            ctx.font = '12px calibri';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'white';
+            ctx.fillText(p.name, p.x, p.y - 26);
+            ctx.textAlign = 'left';
+        }
+
         // Health bar
         const healthPercentage = p.health / 100;
         const hue = healthPercentage * 120;
@@ -144,16 +153,15 @@ export function draw(myId, players, bullets, bossBullets, boss, fullDamageLog, d
     ctx.fillText('Damage Leaderboard', 10, 35);
 
     let rankY = 65;
-    for (const [id, dmg] of Object.entries(fullDamageLog).sort((a, b) => b[1] - a[1])) {
-        const player = players.find(p => String(p.id) === id);
-        const color = player?.color || 'white';
-
-        ctx.fillStyle = color;
+    // Entries are {name, color, dmg} keyed by player id (server-provided)
+    for (const [id, entry] of Object.entries(fullDamageLog).sort((a, b) => b[1].dmg - a[1].dmg)) {
+        ctx.fillStyle = entry.color || 'white';
         ctx.beginPath();
         ctx.arc(16, rankY - 7, 6, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillText(`${Math.floor(dmg)} dmg`, 30, rankY);
+        ctx.fillStyle = 'white';
+        ctx.fillText(`${entry.name || id} — ${Math.floor(entry.dmg)} dmg`, 30, rankY);
         rankY += 25;
     }
 

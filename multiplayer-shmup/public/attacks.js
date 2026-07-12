@@ -4,10 +4,7 @@
 
 let bulletIdCounter = 0;
 
-export function circularAttack(boss, bossBullets, angleOffset) {
-    const BULLET_VELOCITY = 1;
-    const numberOfAngles = 4;
-
+export function circularAttack(boss, bossBullets, angleOffset, numberOfAngles = 4, bulletVelocity = 1) {
     const angleIncrement = Math.PI * 2 / numberOfAngles;
     for (let i = 0; i < numberOfAngles; i++) {
         const angle = i * angleIncrement;
@@ -15,8 +12,8 @@ export function circularAttack(boss, bossBullets, angleOffset) {
             id: bulletIdCounter++,
             x: boss.x,
             y: boss.y,
-            dx: Math.cos(angle + angleOffset) * BULLET_VELOCITY,
-            dy: Math.sin(angle + angleOffset) * BULLET_VELOCITY,
+            dx: Math.cos(angle + angleOffset) * bulletVelocity,
+            dy: Math.sin(angle + angleOffset) * bulletVelocity,
             type: 1, // 1 for circular
             size: 6
         });

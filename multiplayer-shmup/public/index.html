@@ -83,6 +83,114 @@
             font-family: inherit;
             font-size: inherit;
         }
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            z-index: 10;
+        }
+        .overlay-panel {
+            width: 420px;
+            margin: 8% auto 0;
+            background: #222;
+            border: 1px solid #444;
+            padding: 24px;
+        }
+        .overlay-panel h1, .overlay-panel h2 {
+            margin-top: 0;
+        }
+        .overlay-panel label {
+            display: block;
+            margin: 12px 0 4px;
+            color: #aaa;
+        }
+        .overlay-panel input, .overlay-panel select {
+            width: 100%;
+            box-sizing: border-box;
+            background: #111;
+            color: white;
+            border: 1px solid #444;
+            padding: 8px;
+            font-family: inherit;
+            font-size: inherit;
+        }
+        .overlay-panel button {
+            background: #2a5;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            margin-top: 12px;
+            font-family: inherit;
+            font-size: inherit;
+            cursor: pointer;
+            width: 100%;
+        }
+        .overlay-panel button:hover {
+            background: #3c6;
+        }
+        .overlay-panel button.secondary {
+            background: #444;
+        }
+        .overlay-panel button.secondary:hover {
+            background: #555;
+        }
+        .menu-divider {
+            text-align: center;
+            color: #666;
+            margin: 20px 0 8px;
+        }
+        #menu-error, #lobby-error {
+            color: #f66;
+            margin-top: 12px;
+            min-height: 1.2em;
+        }
+        #lobby-code-display {
+            font-size: 2.5rem;
+            letter-spacing: 0.3em;
+            text-align: center;
+            margin: 8px 0;
+            color: #4f4;
+        }
+        .invite-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .invite-row input {
+            flex: 1;
+        }
+        .invite-row button {
+            width: auto;
+            margin-top: 0;
+            flex-shrink: 0;
+        }
+        #lobby-players {
+            list-style: none;
+            padding: 0;
+            margin: 8px 0;
+        }
+        #lobby-players li {
+            padding: 4px 0;
+        }
+        .player-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        #waiting-msg {
+            display: none;
+            color: #aaa;
+            margin-top: 12px;
+            text-align: center;
+        }
     </style>
 </head>
 
@@ -98,6 +206,48 @@
     <div id="death-screen">
         <h1>You died!</h1>
         <p>Respawning in <span id="respawn-countdown"></span>s...</p>
+    </div>
+    <div id="menu" class="overlay">
+        <div class="overlay-panel">
+            <h1>Bullet Hell</h1>
+            <label for="player-name">Your name</label>
+            <input id="player-name" type="text" maxlength="16" placeholder="anon" />
+
+            <label for="encounter-select">Encounter</label>
+            <select id="encounter-select">
+                <option value="twin">The Twin Guardian — classic boss with a co-op orb phase</option>
+                <option value="storm">Bullet Storm — dense bullets, no orb phase</option>
+                <option value="blitz">Blitz — low HP boss, very fast bullets</option>
+            </select>
+            <button id="create-btn">Create Lobby</button>
+
+            <div class="menu-divider">— or join a friend —</div>
+            <label for="join-code">Lobby code</label>
+            <input id="join-code" type="text" maxlength="5" placeholder="e.g. XK4P2" style="text-transform: uppercase;" />
+            <button id="join-btn" class="secondary">Join Lobby</button>
+
+            <div id="menu-error"></div>
+        </div>
+    </div>
+    <div id="lobby-screen" class="overlay">
+        <div class="overlay-panel">
+            <h2>Lobby</h2>
+            <div id="lobby-code-display"></div>
+            <div id="lobby-encounter" style="text-align: center; color: #aaa;"></div>
+
+            <label for="invite-link">Invite link</label>
+            <div class="invite-row">
+                <input id="invite-link" type="text" readonly />
+                <button id="copy-link-btn" class="secondary">Copy</button>
+            </div>
+
+            <label>Players</label>
+            <ul id="lobby-players"></ul>
+
+            <button id="start-btn">Start Game</button>
+            <div id="waiting-msg">Waiting for the host to start...</div>
+            <div id="lobby-error"></div>
+        </div>
     </div>
     <script src="./libs/msgpack.min.js"></script>
     <script type="module" src="client.js"></script>

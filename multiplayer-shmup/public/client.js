@@ -27,13 +27,21 @@ let socket;
 const PLAYER_RADIUS = 10;
 const PLAYER_BULLET_SPEED = 5;
 const PLAYER_SHOT_COOLDOWN = 200; // ms
-const BOSS_ATTACK_RATE = 100; // ms between boss attacks
 const PLAYER_SPEED_PER_SEC = 150; // matches server's PLAYER_SPEED(10) * TICK_RATE(15)
 const RESPAWN_DELAY = 1500; // ms
 const ORB_RADIUS = 18; // collision/render size for the phase-2 orbs
 const BOSS_MESSAGE_DURATION = 4000; // ms boss speech stays on screen
 
+// Fallback attack parameters; overwritten by the encounter config the server
+// sends on join. Attack rate/pattern is what differentiates encounters.
+const DEFAULT_ENCOUNTER = { id: 'twin', name: 'The Twin Guardian', attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1 };
+
 let myId = null;
+let myName = 'anon';
+let lobbyCode = null;
+let isHost = false;
+let inGame = false; // true once the host has started the encounter
+let encounter = DEFAULT_ENCOUNTER;
 let isDead = false;
 let players = {};
 let boss = {};
@@ -42,6 +50,9 @@ let orbs = [];
 let bossMessage = null; // {text, expiresAt} — latest boss speech line
 let fullDamageLog = {};
 const damagePopups = [];
+
+// A message queued to be sent as soon as the socket opens (create/join lobby).
+let pendingMessage = null;
 
 // Grave markers are shared/persistent across the whole game, not per-life
 // state, so they live outside resetLocalState() and survive respawns.
@@ -82,6 +93,103 @@ function resetLocalState() {
     bossAngleOffset = 0;
 }
 
+// --- Menu / lobby UI ------------------------------------------------------
+
+const menuEl = document.getElementById('menu');
+const lobbyScreenEl = document.getElementById('lobby-screen');
+const menuErrorEl = document.getElementById('menu-error');
+const playerNameInput = document.getElementById('player-name');
+const joinCodeInput = document.getElementById('join-code');
+
+function inviteLink(code) {
+    return `${location.origin}${location.pathname}?lobby=${code}`;
+}
+
+function showMenu(error) {
+    menuEl.style.display = 'block';
+    lobbyScreenEl.style.display = 'none';
+    menuErrorEl.textContent = error || '';
+}
+
+function showLobbyScreen() {
+    menuEl.style.display = 'none';
+    lobbyScreenEl.style.display = 'block';
+    document.getElementById('lobby-code-display').textContent = lobbyCode;
+    document.getElementById('invite-link').value = inviteLink(lobbyCode);
+    document.getElementById('start-btn').style.display = isHost ? 'block' : 'none';
+    document.getElementById('waiting-msg').style.display = isHost ? 'none' : 'block';
+}
+
+function hideOverlays() {
+    menuEl.style.display = 'none';
+    lobbyScreenEl.style.display = 'none';
+}
+
+function updateLobbyPlayerList(lobbyPlayers, hostId) {
+    const listEl = document.getElementById('lobby-players');
+    listEl.innerHTML = '';
+    for (const p of lobbyPlayers) {
+        const li = document.createElement('li');
+        const dot = document.createElement('span');
+        dot.className = 'player-dot';
+        dot.style.background = p.color;
+        li.appendChild(dot);
+        li.appendChild(document.createTextNode(p.name + (p.id === hostId ? ' (host)' : '') + (p.id === myId ? ' — you' : '')));
+        listEl.appendChild(li);
+    }
+    document.getElementById('lobby-encounter').textContent = encounter.name;
+}
+
+function connectAndSend(message) {
+    pendingMessage = message;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        send(pendingMessage);
+        pendingMessage = null;
+    } else if (!socket || socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
+        connect();
+    }
+    // If CONNECTING, the open handler will flush pendingMessage.
+}
+
+document.getElementById('create-btn').addEventListener('click', () => {
+    myName = playerNameInput.value.trim() || 'anon';
+    const encounterId = document.getElementById('encounter-select').value;
+    menuErrorEl.textContent = '';
+    connectAndSend({ type: 'createLobby', name: myName, encounter: encounterId });
+});
+
+document.getElementById('join-btn').addEventListener('click', () => {
+    const code = joinCodeInput.value.trim().toUpperCase();
+    if (!code) {
+        menuErrorEl.textContent = 'Enter a lobby code.';
+        return;
+    }
+    myName = playerNameInput.value.trim() || 'anon';
+    menuErrorEl.textContent = '';
+    connectAndSend({ type: 'joinLobby', code, name: myName });
+});
+
+document.getElementById('start-btn').addEventListener('click', () => {
+    send({ type: 'startGame' });
+});
+
+document.getElementById('copy-link-btn').addEventListener('click', () => {
+    const link = document.getElementById('invite-link');
+    link.select();
+    navigator.clipboard.writeText(link.value).then(() => {
+        const btn = document.getElementById('copy-link-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+    });
+});
+
+// Don't let typing in menu inputs drive the ship
+for (const input of [playerNameInput, joinCodeInput]) {
+    input.addEventListener('keydown', e => e.stopPropagation());
+}
+
+// --- Respawn --------------------------------------------------------------
+
 let respawnCountdownInterval = null;
 
 function startRespawnCountdown() {
@@ -102,11 +210,22 @@ function respawn() {
     clearInterval(respawnCountdownInterval);
     document.getElementById('death-screen').style.display = 'none';
     resetLocalState();
-    connect();
+    // Rejoin the same lobby under the same name; the game is already running
+    // there so the server drops us straight back in.
+    connectAndSend({ type: 'joinLobby', code: lobbyCode, name: myName });
 }
+
+// --- Connection -----------------------------------------------------------
 
 function connect() {
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+
+    socket.addEventListener('open', () => {
+        if (pendingMessage) {
+            send(pendingMessage);
+            pendingMessage = null;
+        }
+    });
 
     socket.addEventListener('message', async e => {
         let data;
@@ -118,12 +237,46 @@ function connect() {
             addReceivedBytes(e.data.length);
         }
 
-        if (data.type === 'init') {
+        if (data.type === 'joined') {
             myId = data.id;
+            lobbyCode = data.code;
+            isHost = data.hostId === myId;
+            encounter = data.encounter;
             boss = data.boss;
             graves = data.graves || [];
             phase = data.phase || 1;
             orbs = data.orbs || [];
+            inGame = data.started;
+
+            // Make the current URL shareable/refreshable
+            history.replaceState(null, '', inviteLink(lobbyCode));
+
+            if (inGame) {
+                hideOverlays();
+            } else {
+                showLobbyScreen();
+            }
+            return;
+        }
+
+        if (data.type === 'lobbyError') {
+            showMenu(data.message);
+            inGame = false;
+            lobbyCode = null;
+            return;
+        }
+
+        if (data.type === 'lobbyState') {
+            isHost = data.hostId === myId;
+            encounter = { ...encounter, ...data.encounter };
+            updateLobbyPlayerList(data.players, data.hostId);
+            if (!inGame) showLobbyScreen(); // refresh host controls if host changed
+            return;
+        }
+
+        if (data.type === 'gameStart') {
+            inGame = true;
+            hideOverlays();
             return;
         }
 
@@ -163,7 +316,7 @@ function connect() {
         }
 
         if (data.type === 'chat') {
-            addChatMessage(data.color, data.text);
+            addChatMessage(data.color, data.name ? `${data.name}: ${data.text}` : data.text);
             return;
         }
 
@@ -179,13 +332,19 @@ function connect() {
     });
 }
 
-connect();
+// On load: show the menu, prefilling the lobby code from a shared ?lobby= link
+const urlLobbyCode = new URLSearchParams(location.search).get('lobby');
+if (urlLobbyCode) {
+    joinCodeInput.value = urlLobbyCode.toUpperCase();
+    playerNameInput.focus();
+}
+showMenu();
 
 // Send movement keys state to server every 100ms (or server tick rate).
 // A single interval survives across respawns/reconnects since `socket` is
 // re-pointed at the new connection by connect().
 setInterval(() => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (inGame && socket && socket.readyState === WebSocket.OPEN) {
         send({ type: 'movementUpdate', keys: movementKeys });
     }
 }, 100);
@@ -231,9 +390,9 @@ document.addEventListener('keydown', e => {
         movementKeys[movementKeysMap[e.key]] = true;
     } else if (e.key === ' ' || e.code === 'Space') {
         movementKeys[' '] = true;
-        e.preventDefault(); // don't scroll the page
+        if (inGame) e.preventDefault(); // don't scroll the page
     } else if (e.key === 'Enter') {
-        chatInput.focus();
+        if (inGame) chatInput.focus();
     }
 });
 
@@ -303,23 +462,24 @@ function updateLocalCombat(now, myPos) {
         });
     }
 
-    // Local boss attack simulation (cosmetic/local only, not synced across clients)
+    // Local boss attack simulation (cosmetic/local only, not synced across
+    // clients). Attack rate/pattern comes from the lobby's chosen encounter.
     if (phase === 3) {
         bossBullets.length = 0; // defeated boss stops shooting immediately
     } else if (phase === 2) {
         // The orbs take over the shooting during the co-op phase
-        if (now - lastBossAttack > BOSS_ATTACK_RATE * 2) {
+        if (now - lastBossAttack > encounter.attackRate * 2) {
             lastBossAttack = now;
             for (const orb of orbs) {
-                if (orb.hp > 0) circularAttack(orb, bossBullets, bossAngleOffset);
+                if (orb.hp > 0) circularAttack(orb, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
             }
             bossAngleOffset += 0.15;
         }
-    } else if (boss.x !== undefined && now - lastBossAttack > BOSS_ATTACK_RATE) {
+    } else if (boss.x !== undefined && now - lastBossAttack > encounter.attackRate) {
         lastBossAttack = now;
-        circularAttack(boss, bossBullets, bossAngleOffset);
+        circularAttack(boss, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
         bossAngleOffset += 0.1;
-        if (Math.random() < 0.1) {
+        if (Math.random() < encounter.bigRedChance) {
             bigRedBallAttack(boss, bossBullets);
         }
     }
@@ -407,7 +567,7 @@ function gameLoop() {
     if (!myPos && players[myId]) {
         myPos = { x: players[myId].x, y: players[myId].y };
     }
-    if (!isDead) {
+    if (inGame && !isDead) {
         updateLocalMovement(dt);
     }
 
@@ -420,7 +580,7 @@ function gameLoop() {
     });
 
     const me = interpolatedPlayers.find(p => p.id === myId);
-    if (!isDead) {
+    if (inGame && !isDead) {
         updateLocalCombat(now, me);
     }
 
