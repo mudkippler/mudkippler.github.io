@@ -5,6 +5,64 @@
     <meta charset="UTF-8">
     <title>Bullet Hell 60FPS</title>
     <style>
+        :root {
+            --flair-color: #ff6a3d;
+            --flair-rgb: 255, 106, 61;
+        }
+        /* Subtle, per-encounter themed backdrop for the space around the
+           playfield — a soft glow behind the arena plus a faint geometric
+           motif per boss (crossed blades, lightning streaks, speed lines,
+           etc). Kept low-opacity on purpose so it never competes with the
+           actual bullet-hell action happening on the canvas. */
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background-color: #0a0a0d;
+            background-attachment: fixed;
+            background-image: radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+            transition: background-color 0.8s ease;
+        }
+        body.encounter-twin {
+            background-image:
+                repeating-linear-gradient(45deg, rgba(var(--flair-rgb), 0.05) 0 2px, transparent 2px 46px),
+                repeating-linear-gradient(-45deg, rgba(var(--flair-rgb), 0.05) 0 2px, transparent 2px 46px),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+        }
+        body.encounter-storm {
+            background-image:
+                repeating-linear-gradient(115deg, rgba(var(--flair-rgb), 0.06) 0 1px, transparent 1px 34px),
+                repeating-linear-gradient(115deg, rgba(var(--flair-rgb), 0.03) 0 1px, transparent 1px 90px),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+        }
+        body.encounter-blitz {
+            background-image:
+                repeating-linear-gradient(0deg, rgba(var(--flair-rgb), 0.05) 0 2px, transparent 2px 28px),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.12), transparent 70%);
+        }
+        body.encounter-helix {
+            background-image:
+                repeating-radial-gradient(circle at 50% 50%, rgba(var(--flair-rgb), 0.06) 0 2px, transparent 2px 60px),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+        }
+        body.encounter-tide {
+            background-image:
+                repeating-linear-gradient(0deg, rgba(var(--flair-rgb), 0.05) 0 3px, transparent 3px 50px),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+        }
+        body.encounter-rain {
+            background-image:
+                radial-gradient(circle, rgba(var(--flair-rgb), 0.12) 1.5px, transparent 1.5px),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+            background-size: 34px 34px, auto;
+        }
+        body.encounter-bombardment {
+            background-image:
+                radial-gradient(circle at 15% 25%, rgba(var(--flair-rgb), 0.10), transparent 18%),
+                radial-gradient(circle at 80% 15%, rgba(var(--flair-rgb), 0.08), transparent 14%),
+                radial-gradient(circle at 65% 75%, rgba(var(--flair-rgb), 0.09), transparent 16%),
+                radial-gradient(circle at 25% 80%, rgba(var(--flair-rgb), 0.07), transparent 14%),
+                radial-gradient(ellipse 1000px 650px at 50% 10%, rgba(var(--flair-rgb), 0.10), transparent 70%);
+        }
         canvas {
             background: #111;
             display: block;

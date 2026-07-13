@@ -62,7 +62,8 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   await sleep(250);
   const s = host.lastState();
   check(s.phase === 1, `mid-fight restart reset phase to 1 (was ${s.phase})`);
-  check(s.boss.maxHp === 2000, `boss HP now matches the new encounter (helix=2000, got ${s.boss.maxHp})`);
+  // Two players in this lobby: boss HP scales linearly with headcount.
+  check(s.boss.maxHp === 4000, `boss HP now matches the new encounter (helix=2000 x2 players=4000, got ${s.boss.maxHp})`);
   check(s.paused === false, 'restart un-pauses the lobby');
 
   finish();

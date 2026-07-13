@@ -29,6 +29,21 @@ export function getFlairColor(encounterId) {
     return (FLAIR[encounterId] || DEFAULT_FLAIR).color;
 }
 
+function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
+// Tints the page background (everything outside the playfield) with a
+// per-encounter pattern — see the .encounter-* rules in index.html. Just
+// sets a CSS var + a class; the actual gradients live in CSS so this stays cheap.
+export function applyBackgroundTheme(encounterId) {
+    const flair = FLAIR[encounterId] || DEFAULT_FLAIR;
+    document.body.style.setProperty('--flair-color', flair.color);
+    document.body.style.setProperty('--flair-rgb', hexToRgb(flair.color));
+    document.body.className = encounterId ? `encounter-${encounterId}` : '';
+}
+
 export function updateBossBar(encounter, boss, phase, inGame) {
     barEl.style.display = inGame ? 'block' : 'none';
     if (!inGame || !encounter) return;

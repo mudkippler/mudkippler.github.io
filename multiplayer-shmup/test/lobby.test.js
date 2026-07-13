@@ -56,12 +56,15 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   const lJoined = await late.waitFor('joined');
   check(lJoined.started === true, 'late joiner sees started=true');
 
-  // Damage goes to the right lobby's boss
+  // Damage goes to the right lobby's boss. Two players were in this lobby
+  // when the fight started (boss HP scales linearly with headcount), so the
+  // pool is 3500 x2 = 7000 — the late joiner below doesn't retroactively
+  // rescale it.
   host.send({ type: 'bossDamage' });
   await sleep(300);
   const lastState = [...host.messages].reverse().find(m => m.type === 'state');
   const otherBossFine = ![...other.messages].some(m => m.type === 'state');
-  check(lastState.boss.hp === 3490 && otherBossFine, `boss damage scoped to own lobby (hp=${lastState.boss.hp})`);
+  check(lastState.boss.hp === 6990 && otherBossFine, `boss damage scoped to own lobby (hp=${lastState.boss.hp})`);
 
   // Leaderboard carries names — wait for a fresh broadcast (one sent after
   // bossDamage above), not a stale one already queued from before it.

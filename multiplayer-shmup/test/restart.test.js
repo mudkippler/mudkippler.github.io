@@ -6,7 +6,8 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   const host = makeClient('host');
   await host.open;
   // 'blitz' has the lowest HP of the encounters (1500 main + 300 chase), so
-  // it's cheapest to fully defeat here.
+  // it's cheapest to fully defeat here. Two players join below, which
+  // doubles both pools (boss HP scales linearly with headcount).
   host.send({ type: 'createLobby', name: 'Alice', encounter: 'blitz' });
   const joined = await host.waitFor('joined');
   host.id = joined.id;
@@ -21,11 +22,12 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   await friend.waitFor('gameStart');
   await host.waitFor('state');
 
-  // Defeat the boss all the way through: phase 1 (1500 HP) transitions into
-  // phase 3's enrage chase (another 300 HP) before finally reaching phase 4.
-  // bossDamage applies in both phase 1 and phase 3, so just keep firing.
+  // Defeat the boss all the way through: phase 1 (3000 HP at 2 players)
+  // transitions into phase 3's enrage chase (another 600 HP) before finally
+  // reaching phase 4. bossDamage applies in both phase 1 and phase 3, so just
+  // keep firing.
   let sawChasePhase = false;
-  for (let i = 0; i < 220; i++) {
+  for (let i = 0; i < 400; i++) {
     host.send({ type: 'bossDamage' });
     await sleep(55);
     const s = host.lastState();
@@ -47,7 +49,7 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   await sleep(300);
   s = host.lastState();
   check(s.phase === 1, `host restart resets phase back to 1 (was ${s.phase})`);
-  check(s.boss.hp === s.boss.maxHp && s.boss.maxHp === 1500, `host restart resets boss to full main-phase HP (${s.boss.hp}/${s.boss.maxHp})`);
+  check(s.boss.hp === s.boss.maxHp && s.boss.maxHp === 3000, `host restart resets boss to full main-phase HP (${s.boss.hp}/${s.boss.maxHp})`);
   check(s.players.every(p => !p.dead && p.health === 100), 'host restart brings every player back to full health');
 
   // Confirm the reset actually took (repeated damage works again since the
@@ -56,7 +58,7 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   host.send({ type: 'bossDamage' });
   await sleep(200);
   s = host.lastState();
-  check(s.boss.hp === 1490, `boss is damageable again after restart (hp=${s.boss.hp})`);
+  check(s.boss.hp === 2990, `boss is damageable again after restart (hp=${s.boss.hp})`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });

@@ -314,13 +314,13 @@ const BOSS_LINES = {
     phase1: {
       100: ['Brace yourselves. Impact incoming.'],
       75: ['First volley — barely a scratch.'],
-      50: ['Feel the barrage intensify.'],
-      25: ["You're punching through my lines!"]
+      50: ['Auxiliary silos online - doubling payloads.'],
+      25: ["Disable safety protocols."]
     },
     enrage: {
       75: ['FULL BOMBARDMENT — NO SURVIVORS!', "Everything I've got. NOW!"],
       50: ["I WON'T STOP FIRING!!", 'SATURATE THE FIELD!'],
-      25: ["m-my arsenal's... failing—", 'ONE MORE VOLLEY! JUST ONE MORE!', '*explosions stutter and misfire*']
+      25: ["m-my arsenal's... failing—", 'ONE MORE VOLLEY! JUST ONE MORE!', 'AHAHAHAHAHAHAH!!!!']
     }
   }
 };
@@ -377,6 +377,15 @@ function broadcastLobbyState(lobby) {
   }));
 }
 
+// Boss HP scales linearly with headcount (double for 2 players, triple for
+// 3, ...) so the fight stays roughly as hard per-player regardless of party
+// size. Read at each phase transition (fight start, restart, entering the
+// enrage chase) rather than continuously, so a player joining/leaving
+// mid-fight doesn't retroactively rescale HP already in progress.
+function playerCount(lobby) {
+  return Math.max(1, Object.keys(lobby.players).length);
+}
+
 // Resets an in-progress or finished encounter back to phase 1 with full boss
 // HP and every player alive at full health. Used both for the automatic
 // team-wipe recovery and a host-triggered restart after victory.
@@ -384,7 +393,7 @@ function resetEncounter(lobby) {
   lobby.wipeAt = null;
   lobby.boss.x = 400;
   lobby.boss.y = 100;
-  lobby.boss.maxHp = lobby.encounter.bossMaxHp; // chase phase may have shrunk this
+  lobby.boss.maxHp = lobby.encounter.bossMaxHp * playerCount(lobby); // chase phase may have shrunk this
   lobby.boss.hp = lobby.boss.maxHp;
   lobby.phase = 1;
   lobby.orbs = [];
@@ -418,8 +427,8 @@ function startPhase2(lobby) {
 function startChasePhase(lobby, taunt) {
   lobby.phase = 3;
   lobby.orbs = [];
-  lobby.boss.maxHp = lobby.encounter.chaseMaxHp;
-  lobby.boss.hp = lobby.encounter.chaseMaxHp;
+  lobby.boss.maxHp = lobby.encounter.chaseMaxHp * playerCount(lobby);
+  lobby.boss.hp = lobby.boss.maxHp;
   lobby.chase = { waypoint: pickChaseWaypoint(), lastAimedShot: Date.now() };
   bossSay(lobby, taunt, 3);
 }
@@ -541,6 +550,10 @@ wss.on('connection', (ws) => {
       if (data.type === 'startGame') {
         if (ws.id !== lobby.hostId || lobby.started) return;
         lobby.started = true;
+        // Scale HP for however many players are actually here now — createLobby
+        // set it assuming just the host, since others may have joined since.
+        lobby.boss.maxHp = lobby.encounter.bossMaxHp * playerCount(lobby);
+        lobby.boss.hp = lobby.boss.maxHp;
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
         bossSayPhaseStart(lobby, 'phase1');

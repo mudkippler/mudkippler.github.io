@@ -1,7 +1,7 @@
 import { draw } from './renderer.js';
 import { updateHUD } from './hud.js';
 import { updateLeaderboard } from './leaderboard.js';
-import { updateBossBar, getFlairColor } from './bossbar.js';
+import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js';
 import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
 import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE } from './attacks.js';
@@ -285,6 +285,7 @@ function connect() {
             inGame = data.started;
             paused = data.paused || false;
             setBossPortrait(encounter.id, bossPortraitState(phase, boss.hp, boss.maxHp));
+            applyBackgroundTheme(encounter.id);
 
             // Make the current URL shareable/refreshable
             history.replaceState(null, '', inviteLink(lobbyCode));
@@ -335,6 +336,7 @@ function connect() {
             lastBossAttack = 0;
             bossAngleOffset = 0;
             setBossPortrait(encounter.id, 'base');
+            applyBackgroundTheme(encounter.id);
             updateHostControls();
             return;
         }

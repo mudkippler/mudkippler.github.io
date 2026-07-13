@@ -100,7 +100,8 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
   await sleep(300);
   const twinChaseState = twinHost.lastState();
   check(twinChaseState.phase === 3, `clearing both twin orbs together enters phase 3 (was ${twinChaseState.phase})`);
-  check(twinChaseState.boss.maxHp === 800, `twin's chase phase uses its own chase HP pool (800), got ${twinChaseState.boss.maxHp}`);
+  // Two players in this lobby: boss HP scales linearly with headcount.
+  check(twinChaseState.boss.maxHp === 1600, `twin's chase phase uses its own chase HP pool (800 x2 players=1600), got ${twinChaseState.boss.maxHp}`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });
