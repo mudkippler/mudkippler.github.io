@@ -4,7 +4,7 @@ import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js';
 import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
-import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE } from './attacks.js';
+import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, stormRainAttack, lightningAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE } from './attacks.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -78,10 +78,18 @@ let bullets = []; // local player bullets
 let allyBullets = []; // teammates' bullets, spawned from relayed shot origins
 let bossBullets = []; // local boss bullets
 let bossMissiles = []; // local bombardment telegraphs/explosions — timed hazards, not moving projectiles
+let bossLightning = []; // local storm lightning telegraphs/strikes — timed hazards, same idea as bossMissiles
 let bulletIdCounter = 0;
 let lastShot = 0;
 let lastBossAttack = 0;
 let bossAngleOffset = 0;
+let lastLightning = 0;
+let lightningInterval = 1800; // ms until the next bolt; re-randomized after each strike for an organic cadence
+
+// Storm's current wind push, in px/sec — server-authoritative (see the
+// 'state' handler) so every client's local prediction agrees on the same
+// gusts instead of drifting apart with independently-computed randomness.
+let wind = { x: 0, y: 0 };
 
 // Bombardment's "low health" escalation (extra missiles per line / extra
 // simultaneous lines) is tracked as a ratchet — the highest level earned so
@@ -333,6 +341,7 @@ function connect() {
             allyBullets = [];
             bossBullets = [];
             bossMissiles = [];
+            bossLightning = [];
             lastBossAttack = 0;
             bossAngleOffset = 0;
             setBossPortrait(encounter.id, 'base');
@@ -377,6 +386,7 @@ function connect() {
             }
 
             boss = { ...boss, ...data.boss };
+            wind = data.wind || { x: 0, y: 0 };
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
             if (phase === 4 && (data.phase || 1) === 1) myPos = null;
@@ -693,6 +703,7 @@ function updateLocalCombat(now, myPos, alive) {
     if (phase === 4) {
         bossBullets.length = 0; // defeated boss stops shooting immediately
         bossMissiles.length = 0;
+        bossLightning.length = 0;
     } else if (phase === 2) {
         // The orbs take over the shooting during the co-op phase
         if (now - lastBossAttack > encounter.attackRate * 2) {
@@ -717,6 +728,9 @@ function updateLocalCombat(now, myPos, alive) {
             case 'rain':
                 rainAttack(bossBullets, encounter.bulletSpeed, encounter.drops);
                 break;
+            case 'storm':
+                stormRainAttack(bossBullets, encounter.bulletSpeed, encounter.drops, wind);
+                break;
             case 'bombardment': {
                 const hpFraction = boss.hp / (boss.maxHp || 1);
                 // Ratchet upward only — see the bonus vars' declaration for why.
@@ -732,6 +746,15 @@ function updateLocalCombat(now, myPos, alive) {
                     bigRedBallAttack(boss, bossBullets);
                 }
         }
+    }
+
+    // Storm lightning strikes on its own cadence, independent of the rain
+    // droplet rate above — randomized a little each time so gusts of bolts
+    // don't fall into a predictable rhythm.
+    if (encounter.pattern === 'storm' && (phase === 1 || phase === 3) && now - lastLightning > lightningInterval) {
+        lastLightning = now;
+        lightningInterval = 1400 + Math.random() * 1400;
+        lightningAttack(bossLightning, now);
     }
 
     // Update + collide player bullets against the current phase's target(s)
@@ -811,6 +834,27 @@ function updateLocalCombat(now, myPos, alive) {
             }
         }
     }
+
+    // Storm lightning bolts: telegraph then a brief full-height strike hitbox
+    // (a narrow vertical band, not a point) centered on the bolt's x.
+    for (let i = bossLightning.length - 1; i >= 0; i--) {
+        const bolt = bossLightning[i];
+        if (!bolt.struck && now >= bolt.strikeTime) {
+            bolt.struck = true;
+        }
+
+        if (bolt.struck) {
+            const elapsed = now - bolt.strikeTime;
+            if (alive && myPos && !bolt.hit && elapsed < LIGHTNING_STRIKE_MS && Math.abs(myPos.x - bolt.x) < LIGHTNING_WIDTH) {
+                bolt.hit = true; // one hit per strike, not per frame it lingers
+                addDamagePopup(bolt.x, myPos.y, -LIGHTNING_DAMAGE, 'red');
+                send({ type: 'playerDamage', source: 'lightning' });
+            }
+            if (elapsed > LIGHTNING_STRIKE_MS) {
+                bossLightning.splice(i, 1);
+            }
+        }
+    }
 }
 
 function updateLocalMovement(dt) {
@@ -830,6 +874,13 @@ function updateLocalMovement(dt) {
 
     myPos.x += vx * PLAYER_SPEED_PER_SEC * dt;
     myPos.y += vy * PLAYER_SPEED_PER_SEC * dt;
+
+    // Storm's wind keeps pushing everyone around even while standing still.
+    if (encounter.pattern === 'storm' && (phase === 1 || phase === 3)) {
+        myPos.x += wind.x * dt;
+        myPos.y += wind.y * dt;
+    }
+
     myPos.x = Math.max(0, Math.min(800, myPos.x));
     myPos.y = Math.max(0, Math.min(600, myPos.y));
 }
@@ -865,7 +916,7 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, boss, damagePopups, graves, orbs, phase);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase);
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
     updateBossBar(encounter, boss, phase, inGame);

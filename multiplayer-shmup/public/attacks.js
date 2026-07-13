@@ -84,6 +84,44 @@ export function rainAttack(bossBullets, bulletVelocity = 2.2, drops = 3) {
     }
 }
 
+// Storm rain: droplets falling from the top edge like acid rain, but their
+// sideways drift is driven by the encounter's current wind vector instead of
+// being random — the whole sky visibly leans with the gusts.
+export function stormRainAttack(bossBullets, bulletVelocity = 2, drops = 4, wind = { x: 0, y: 0 }) {
+    for (let i = 0; i < drops; i++) {
+        bossBullets.push({
+            id: bulletIdCounter++,
+            x: Math.random() * 800,
+            y: 1,
+            dx: wind.x / 50 + (Math.random() - 0.5) * 0.3,
+            dy: bulletVelocity * (0.8 + Math.random() * 0.5),
+            type: 7, // 7 for storm rain
+            size: 4
+        });
+    }
+}
+
+// Lightning: a vertical warning bar telegraphs where a bolt will land, then
+// it becomes a brief full-height strike hitbox. Like the bombardment
+// missiles these are timed hazards the caller (client.js) drives by
+// wall-clock time rather than per-frame dx/dy, on their own cadence
+// independent of the rain above.
+export const LIGHTNING_WARNING_MS = 550;
+export const LIGHTNING_STRIKE_MS = 150;
+export const LIGHTNING_WIDTH = 16; // px, half-width of the strike hitbox
+export const LIGHTNING_DAMAGE = 25; // matches the server's LIGHTNING_DAMAGE — local popup only
+
+export function lightningAttack(bolts, now, xMin = 60, xMax = 740) {
+    bolts.push({
+        id: bulletIdCounter++,
+        x: xMin + Math.random() * (xMax - xMin),
+        spawnTime: now,
+        strikeTime: now + LIGHTNING_WARNING_MS,
+        struck: false,
+        hit: false
+    });
+}
+
 // One or more volleys of missiles fired offscreen that each land in a line,
 // one after another, each telegraphing its landing spot before it impacts.
 // Unlike the other attacks these aren't moving projectiles — they're timed

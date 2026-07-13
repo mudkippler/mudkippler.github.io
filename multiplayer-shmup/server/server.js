@@ -43,6 +43,8 @@ const PLAYER_SPEED_PER_SEC = 150; // matches the client's prediction speed
 const PLAYER_BULLET_SPEED = 5; // matches the client's bullet speed, used to clamp relayed aim vectors
 const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report arbitrary damage
 const MISSILE_DAMAGE = 35; // bombardment explosions hit harder than a regular boss bullet
+const LIGHTNING_DAMAGE = 25; // storm's lightning strikes, between a regular bullet and a missile
+const WIND_MAX_STRENGTH = 120; // px/sec, storm's strongest gusts (see the wind block in gameLoop)
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
 const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
 const CHAT_MAX_LENGTH = 200;
@@ -86,10 +88,15 @@ const ENCOUNTERS = {
     attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1,
     chaseMaxHp: 800, chaseSpeed: 70, aimedShotInterval: 1400, aimedBulletSpeed: 3.2
   },
+  // Slanting rain + telegraphed lightning strikes (see lightningAttack in
+  // attacks.js) instead of the default ring, plus wind that continuously
+  // pushes players around (see the wind block in gameLoop) — the rain's
+  // sideways drift follows the same wind vector so the whole sky visibly
+  // leans with the gusts.
   storm: {
-    id: 'storm', name: 'Bullet Storm',
+    id: 'storm', name: 'Bullet Storm', pattern: 'storm',
     bossMaxHp: 3500, hasOrbPhase: false,
-    attackRate: 70, numberOfAngles: 6, bulletSpeed: 1.2, bigRedChance: 0.2,
+    attackRate: 55, drops: 5, bulletSpeed: 2.4, bigRedChance: 0,
     chaseMaxHp: 600, chaseSpeed: 90, aimedShotInterval: 1000, aimedBulletSpeed: 3.6
   },
   blitz: {
@@ -592,7 +599,11 @@ wss.on('connection', (ws) => {
           // subsequent report, while a genuine teleport stays out of reach of
           // the cap forever.
           const elapsed = Math.min((now - player.lastPosReport) / 1000, 0.5);
-          const maxDist = PLAYER_SPEED_PER_SEC * elapsed * 1.5 + 2;
+          // Storm's wind can push a player well beyond their own top speed —
+          // give the cap extra slack matching the wind's max strength so a
+          // legitimate gust-blown report doesn't get rejected as a teleport.
+          const windSlack = lobby.encounter.pattern === 'storm' ? WIND_MAX_STRENGTH * elapsed * 1.5 : 0;
+          const maxDist = PLAYER_SPEED_PER_SEC * elapsed * 1.5 + 2 + windSlack;
           const nx = Math.max(0, Math.min(800, data.x));
           const ny = Math.max(0, Math.min(600, data.y));
           if (Math.hypot(nx - player.x, ny - player.y) <= maxDist) {
@@ -651,7 +662,7 @@ wss.on('connection', (ws) => {
         // The client only reports *that* it was hit and by what — the amount
         // is still fixed server-side per source so a client can't self-report
         // arbitrary damage.
-        const damage = data.source === 'missile' ? MISSILE_DAMAGE : BULLET_DAMAGE;
+        const damage = data.source === 'missile' ? MISSILE_DAMAGE : data.source === 'lightning' ? LIGHTNING_DAMAGE : BULLET_DAMAGE;
         player.health -= damage;
         if (player.health <= 0 && !player.dead) {
           player.health = 0;
@@ -763,6 +774,21 @@ function gameLoop() {
         bossSay(lobby, 'back for another beating?');
       }
 
+      // Storm's wind: two layered sine waves for a direction/strength that
+      // smoothly gusts over time rather than flipping instantly. Computed
+      // server-side and broadcast as the actual x/y push (not the formula)
+      // so every client's local prediction agrees on the same gusts without
+      // needing clock sync. Only relevant during the main fight/enrage chase.
+      if (lobby.encounter.pattern === 'storm' && (lobby.phase === 1 || lobby.phase === 3)) {
+        const wt = now / 1000;
+        const windAngle = Math.sin(wt * 0.15) * 1.0 + Math.sin(wt * 0.37) * 0.4;
+        const gust = Math.pow(0.5 + 0.5 * Math.sin(wt * 0.5), 6); // occasional strong pulses, mostly calm between
+        const windStrength = 30 + gust * (WIND_MAX_STRENGTH - 30);
+        lobby.wind = { x: Math.cos(windAngle) * windStrength, y: Math.sin(windAngle) * windStrength * 0.15 };
+      } else {
+        lobby.wind = null;
+      }
+
       // Update players (dead bodies stay where they fell)
       for (const id in lobby.players) {
         const p = lobby.players[id];
@@ -789,6 +815,10 @@ function gameLoop() {
 
         p.x += p.vx * PLAYER_SPEED_PER_SEC * dt;
         p.y += p.vy * PLAYER_SPEED_PER_SEC * dt;
+        if (lobby.wind) {
+          p.x += lobby.wind.x * dt;
+          p.y += lobby.wind.y * dt;
+        }
 
         // Clamp player position to screen bounds
         p.x = Math.max(0, Math.min(800, p.x));
@@ -876,7 +906,10 @@ function gameLoop() {
       boss: { x: t(lobby.boss.x), y: t(lobby.boss.y), hp: lobby.boss.hp, maxHp: lobby.boss.maxHp },
       phase: lobby.phase,
       orbs: publicOrbs(lobby),
-      paused: lobby.paused
+      paused: lobby.paused,
+      // Omitted entirely outside storm's wind-active phases to save bytes on
+      // every other encounter/lobby's per-tick broadcast.
+      ...(lobby.wind ? { wind: { x: t(lobby.wind.x), y: t(lobby.wind.y) } } : {})
     }));
   }
 }

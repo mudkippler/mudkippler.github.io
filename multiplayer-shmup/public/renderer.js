@@ -1,4 +1,4 @@
-import { MISSILE_EXPLOSION_DURATION } from './attacks.js';
+import { MISSILE_EXPLOSION_DURATION, LIGHTNING_WARNING_MS, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH } from './attacks.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -133,7 +133,63 @@ function drawMissiles(missiles, boss) {
     ctx.globalAlpha = 1;
 }
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, boss, damagePopups, graves, orbs, phase) {
+let flashEndTime = 0;
+const FLASH_DURATION = 120; // ms, the screen-wide brightness pulse on a lightning strike
+
+// Storm lightning: a dashed vertical bar telegraphs the strike column, then
+// a jagged bolt (regenerated fresh per strike so it never repeats) flashes
+// in as the actual hitbox, paired with a screen shake + brightness pulse.
+function drawLightning(bolts) {
+    const now = performance.now();
+    for (const bolt of bolts) {
+        if (!bolt.struck) {
+            const dangerFrac = Math.max(0, Math.min(1, (now - bolt.spawnTime) / LIGHTNING_WARNING_MS));
+            ctx.globalAlpha = (0.15 + 0.35 * dangerFrac) + 0.15 * Math.sin(now / 60);
+            ctx.strokeStyle = '#fff7cc';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 6]);
+            ctx.beginPath();
+            ctx.moveTo(bolt.x, 0);
+            ctx.lineTo(bolt.x, 600);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        } else {
+            if (!bolt.shaken) {
+                bolt.shaken = true;
+                shakeEndTime = now + SHAKE_DURATION * 1.4;
+                flashEndTime = now + FLASH_DURATION;
+                // Jagged path down the screen, generated once so it holds
+                // steady for the strike's full duration instead of jittering.
+                bolt.points = [];
+                let x = bolt.x, y = 0;
+                while (y < 600) {
+                    y += 26 + Math.random() * 28;
+                    x += (Math.random() - 0.5) * 26;
+                    bolt.points.push({ x, y: Math.min(y, 600) });
+                }
+            }
+
+            const p = Math.min(1, (now - bolt.strikeTime) / LIGHTNING_STRIKE_MS);
+            ctx.globalAlpha = 0.25 * (1 - p);
+            ctx.fillStyle = '#eaffff';
+            ctx.fillRect(bolt.x - LIGHTNING_WIDTH, 0, LIGHTNING_WIDTH * 2, 600);
+
+            ctx.globalAlpha = (1 - p) * (0.75 + 0.25 * Math.random());
+            ctx.strokeStyle = '#eaffff';
+            ctx.lineWidth = 4 * (1 - p) + 2;
+            ctx.shadowColor = '#aef';
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.moveTo(bolt.x, 0);
+            for (const pt of bolt.points) ctx.lineTo(pt.x, pt.y);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+    }
+    ctx.globalAlpha = 1;
+}
+
+export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase) {
     // Reset any transform left over from a previous shaking frame before
     // clearing, so the clear always covers the full physical canvas.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -271,6 +327,20 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         6: { color: 'greenyellow', size: 5 }  // acid rain droplets
     };
     for (const b of bossBullets) {
+        if (b.type === 7) {
+            // Storm rain: a short streak along its own velocity instead of a
+            // dot, so wind-driven drift reads visually as slanting rain.
+            const speed = Math.hypot(b.dx, b.dy) || 1;
+            ctx.globalAlpha = 0.85;
+            ctx.strokeStyle = '#bcd9ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(b.x, b.y);
+            ctx.lineTo(b.x - (b.dx / speed) * 10, b.y - (b.dy / speed) * 10);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            continue;
+        }
         const style = BULLET_STYLES[b.type] || { color: 'white', size: b.size || 5 };
         ctx.fillStyle = style.color;
         ctx.beginPath();
@@ -279,6 +349,16 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     }
 
     drawMissiles(bossMissiles, boss);
+    if (bossLightning) drawLightning(bossLightning);
+
+    // A lightning strike briefly brightens the whole scene.
+    const nowFlash = performance.now();
+    if (nowFlash < flashEndTime) {
+        ctx.globalAlpha = ((flashEndTime - nowFlash) / FLASH_DURATION) * 0.35;
+        ctx.fillStyle = '#eaffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1;
+    }
 
     // Damage Popups
     for (let i = damagePopups.length - 1; i >= 0; i--) {
