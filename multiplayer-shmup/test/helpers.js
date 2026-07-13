@@ -3,6 +3,7 @@
 // protocol against a live server instance — no mocking of game logic.
 const WebSocket = require('ws');
 const msgpack = require('@ygoe/msgpack');
+const { ENCOUNTERS } = require('../server/encounters');
 
 const PORT = process.env.TEST_PORT || 3100;
 const URL = `ws://localhost:${PORT}`;
@@ -62,6 +63,16 @@ function makeClient(name) {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// The wire's `phase` field is an index into the encounter's phase list —
+// resolve it from the phase's stable id so assertions read as intent
+// ('enrage', 'defeated') instead of magic numbers that shift when a fight
+// gains a phase.
+function phaseIndex(encounterId, phaseId) {
+  const index = ENCOUNTERS[encounterId].phases.findIndex(p => p.id === phaseId);
+  if (index === -1) throw new Error(`encounter ${encounterId} has no phase '${phaseId}'`);
+  return index;
+}
+
 // Kill a player by reporting playerDamage 10 times (100 HP / 10 dmg), spaced
 // past the server's 50ms anti-spam window.
 async function kill(client) {
@@ -96,4 +107,4 @@ async function standOn(mover, targetId, until, timeout = 20000) {
   return false;
 }
 
-module.exports = { check, finish, makeClient, sleep, kill, standOn };
+module.exports = { check, finish, makeClient, sleep, kill, standOn, phaseIndex };

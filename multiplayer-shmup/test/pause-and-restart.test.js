@@ -2,7 +2,7 @@
 // boss": only the host can toggle either, pausing freezes the boss/players/
 // damage in place, and restarting mid-fight (not just after victory) can
 // swap in a new encounter and un-pauses automatically.
-const { check, finish, makeClient, sleep } = require('./helpers');
+const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
 
 (async () => {
   const host = makeClient('host');
@@ -52,8 +52,8 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   await sleep(150);
   check(host.lastState().boss.hp === bossHpBefore - 10, 'damage lands again after resuming');
 
-  // Mid-fight restart with a different boss: allowed even though phase !== 4,
-  // and the new encounter config is broadcast to everyone.
+  // Mid-fight restart with a different boss: allowed even though the fight
+  // isn't over, and the new encounter config is broadcast to everyone.
   const encounterPromise = friend.waitForNext('encounterChanged');
   host.send({ type: 'restartGame', encounterId: 'helix' });
   const encounterMsg = await encounterPromise;
@@ -61,7 +61,7 @@ const { check, finish, makeClient, sleep } = require('./helpers');
 
   await sleep(250);
   const s = host.lastState();
-  check(s.phase === 1, `mid-fight restart reset phase to 1 (was ${s.phase})`);
+  check(s.phase === phaseIndex('helix', 'main'), `mid-fight restart reset to the main phase (was ${s.phase})`);
   // Two players in this lobby: boss HP scales linearly with headcount.
   check(s.boss.maxHp === 4000, `boss HP now matches the new encounter (helix=2000 x2 players=4000, got ${s.boss.maxHp})`);
   check(s.paused === false, 'restart un-pauses the lobby');

@@ -2,10 +2,10 @@
 // Portrait art is optional: drop these into public/img and they're picked up
 // automatically (missing files just hide the portrait frame instead of
 // showing a broken image):
-//   img/<encounterId>.png            — phase 1, HP above 50%
-//   img/<encounterId>_injured.png    — phase 1, HP at or below 50%
-//   img/<encounterId>_enraged.png    — phase 3 (the enrage chase)
-//   img/<encounterId>_defeat.png     — phase 4 (boss down)
+//   img/<encounterId>.png            — HP above 50%
+//   img/<encounterId>_injured.png    — HP at or below 50%
+//   img/<encounterId>_enraged.png    — phases with portrait: 'enraged' (the enrage chase)
+//   img/<encounterId>_defeat.png     — phases with portrait: 'defeat' (boss down)
 
 const containerEl = document.getElementById('boss-dialogue');
 const portraitImg = document.getElementById('boss-portrait-img');
@@ -25,10 +25,10 @@ export function showBossDialogue(inGame) {
     containerEl.style.display = inGame ? 'block' : 'none';
 }
 
-// Derives which portrait state to show from the boss's current phase/HP.
-export function bossPortraitState(phase, hp, maxHp) {
-    if (phase === 4) return 'defeat';
-    if (phase === 3) return 'enraged';
+// Derives which portrait state to show: phases can pin one via their
+// `portrait` field (see server/encounters.js); otherwise it follows HP.
+export function bossPortraitState(phaseDef, hp, maxHp) {
+    if (phaseDef && phaseDef.portrait) return phaseDef.portrait;
     return hp / (maxHp || 1) <= 0.5 ? 'injured' : 'base';
 }
 

@@ -245,7 +245,7 @@ function drawLightning(bolts) {
 
 let lastDrawTime = performance.now();
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase, stormUmbrellaActive) {
+export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef, stormUmbrellaActive) {
     // Reset any transform left over from a previous shaking frame before
     // clearing, so the clear always covers the full physical canvas.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -266,9 +266,9 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
 
-    // Boss — tinted red during the phase-3 enrage chase as a readable signal
-    // that it's now mobile and firing aimed shots, not just standing still.
-    ctx.fillStyle = phase === 3 ? '#a33' : 'gray';
+    // Boss — phases can tint the body (e.g. red during the enrage chase as a
+    // readable signal that it's now mobile and firing aimed shots).
+    ctx.fillStyle = (phaseDef && phaseDef.bossTint) || 'gray';
     ctx.beginPath();
     ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -282,7 +282,7 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         ctx.strokeRect(boss.x - boss.radius, boss.y - boss.radius - 15, boss.radius * 2, 6);
     }
 
-    // Twin orbs (phase 2 co-op targets); dead orbs linger as faded husks so
+    // Twin orbs (orb-phase co-op targets); dead orbs linger as faded husks so
     // players can see what still needs to drop before the revive window closes
     if (orbs) {
         const ORB_RADIUS = 18;
@@ -383,7 +383,7 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     const BULLET_STYLES = {
         1: { color: 'cyan', size: 6 },        // circular ring
         2: { color: 'red', size: 20 },        // big red ball
-        3: { color: 'orange', size: 8 },      // phase-3 aimed shots
+        3: { color: 'orange', size: 8 },      // enrage-chase aimed shots
         4: { color: 'magenta', size: 5 },     // spiral arms
         5: { color: 'gold', size: 5 },        // sweeping wave fan
         6: { color: 'greenyellow', size: 5 }  // acid rain droplets

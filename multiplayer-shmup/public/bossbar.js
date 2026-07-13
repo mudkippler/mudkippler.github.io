@@ -17,12 +17,6 @@ const FLAIR = {
 };
 const DEFAULT_FLAIR = { icon: '☠', color: '#ff6a3d' };
 
-const PHASE_SUBTITLE = {
-    2: 'Destroy the twin orbs — together',
-    3: 'Enraged',
-    4: 'Defeated'
-};
-
 // Shared with the chat panel so boss speech lines pick up the same
 // encounter-specific accent color as the health bar/name above the playfield.
 export function getFlairColor(encounterId) {
@@ -44,24 +38,27 @@ export function applyBackgroundTheme(encounterId) {
     document.body.className = encounterId ? `encounter-${encounterId}` : '';
 }
 
-export function updateBossBar(encounter, boss, phase, inGame) {
+export function updateBossBar(encounter, boss, phaseDef, inGame) {
     barEl.style.display = inGame ? 'block' : 'none';
     if (!inGame || !encounter) return;
+    phaseDef = phaseDef || {};
 
     const flair = FLAIR[encounter.id] || DEFAULT_FLAIR;
     nameEl.textContent = `${flair.icon} ${encounter.name} ${flair.icon}`;
     nameEl.style.color = flair.color;
     nameEl.style.textShadow = `0 0 10px ${flair.color}, 0 0 18px ${flair.color}`;
 
-    subtitleEl.textContent = PHASE_SUBTITLE[phase] || '';
+    subtitleEl.textContent = phaseDef.subtitle || '';
 
     const maxHp = boss.maxHp || 1;
     const pct = Math.max(0, Math.min(1, (boss.hp || 0) / maxHp));
     fillEl.style.width = `${pct * 100}%`;
-    fillEl.style.background = phase === 4
+    // The bar recolors with the phase's mood: gray once won, burnt orange
+    // while the boss rages, red otherwise.
+    fillEl.style.background = phaseDef.victory
         ? 'linear-gradient(180deg, #777, #333)'
-        : phase === 3
+        : phaseDef.portrait === 'enraged'
             ? 'linear-gradient(180deg, #ff8a4d, #b32d00)'
             : 'linear-gradient(180deg, #f66, #a11)';
-    hpTextEl.textContent = phase === 4 ? 'DEFEATED' : `${Math.max(0, Math.ceil(boss.hp || 0))} / ${maxHp}`;
+    hpTextEl.textContent = phaseDef.victory ? 'DEFEATED' : `${Math.max(0, Math.ceil(boss.hp || 0))} / ${maxHp}`;
 }

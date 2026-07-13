@@ -4,7 +4,8 @@ import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js';
 import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
-import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, stormRainAttack, lightningAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE, isBlockedByStormUmbrella } from './attacks.js';
+import { MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE, isBlockedByStormUmbrella } from './attacks.js';
+import { MECHANICS } from './mechanics.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -31,7 +32,7 @@ const PLAYER_RADIUS = 10;
 const PLAYER_BULLET_SPEED = 5;
 const PLAYER_SHOT_COOLDOWN = 200; // ms
 const PLAYER_SPEED_PER_SEC = 150; // matches the server's dt-scaled movement speed
-const ORB_RADIUS = 18; // collision/render size for the phase-2 orbs
+const ORB_RADIUS = 18; // collision/render size for the orb-phase orbs
 const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 
 // The client is authoritative for its own position: movementUpdate reports
@@ -42,9 +43,14 @@ const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 // copy is discontinuously far from our prediction, snap to it.
 const RECONCILE_SNAP = 80; // px
 
-// Fallback attack parameters; overwritten by the encounter config the server
-// sends on join. Attack rate/pattern is what differentiates encounters.
-const DEFAULT_ENCOUNTER = { id: 'twin', name: 'The Twin Guardian', attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1 };
+// Fallback encounter shape until the server's config lands on join. Each
+// encounter is an ordered list of phases (see server/encounters.js for the
+// full field reference); the phase's `mechanic`/`params` drive the local
+// attack simulation and its flags drive the UI.
+const DEFAULT_ENCOUNTER = {
+    id: 'twin', name: 'The Twin Guardian',
+    phases: [{ id: 'main', bossDamageable: true, mechanic: 'ring', params: { attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1 } }]
+};
 
 let myId = null;
 let myName = 'anon';
@@ -56,8 +62,16 @@ let isDead = false;
 let paused = false; // host-toggled; freezes movement/combat, server still broadcasts state
 let players = {};
 let boss = {};
-let phase = 1; // 1: boss, 2: twin orbs, 3: enrage chase, 4: defeated (authoritative from server)
+let phaseIndex = 0; // index into encounter.phases (authoritative from server)
 let orbs = [];
+
+// The active phase's definition — what's damageable, which mechanic runs,
+// what the boss bar/portrait should show. Everything that used to key off a
+// magic phase number reads a field from this instead.
+function phaseDef() {
+    const defs = encounter.phases || [];
+    return defs[phaseIndex] || defs[0] || {};
+}
 let fullDamageLog = {};
 const damagePopups = [];
 
@@ -81,24 +95,17 @@ let bossMissiles = []; // local bombardment telegraphs/explosions — timed haza
 let bossLightning = []; // local storm lightning telegraphs/strikes — timed hazards, same idea as bossMissiles
 let bulletIdCounter = 0;
 let lastShot = 0;
-let lastBossAttack = 0;
-let bossAngleOffset = 0;
-let lastLightning = 0;
-let lightningInterval = 1800; // ms until the next bolt; re-randomized after each strike for an organic cadence
+
+// Scratch state for the active boss mechanic (attack cadence, ring rotation,
+// bombardment's difficulty ratchet — see mechanics.js). Deliberately kept
+// across phase transitions so timers/ratchets carry from the main fight into
+// the enrage chase; reset when the encounter changes or resets.
+let mechState = {};
 
 // Storm's current wind push, in px/sec — server-authoritative (see the
 // 'state' handler) so every client's local prediction agrees on the same
 // gusts instead of drifting apart with independently-computed randomness.
 let wind = { x: 0, y: 0 };
-
-// Bombardment's "low health" escalation (extra missiles per line / extra
-// simultaneous lines) is tracked as a ratchet — the highest level earned so
-// far — rather than a pure function of the current hp/maxHp fraction. Phase
-// 3 (enrage) refills the boss's HP into a smaller pool, and we want the
-// bonuses already earned in phase 1 to persist through that refill and keep
-// climbing from there, not reset back down to "full health" difficulty.
-let bombardmentMissileBonus = 0;
-let bombardmentLineBonus = 0;
 
 const movementKeys = {}; // Store current state of movement keys
 
@@ -288,11 +295,11 @@ function connect() {
             encounter = data.encounter;
             boss = data.boss;
             graves = data.graves || [];
-            phase = data.phase || 1;
+            phaseIndex = data.phase || 0;
             orbs = data.orbs || [];
             inGame = data.started;
             paused = data.paused || false;
-            setBossPortrait(encounter.id, bossPortraitState(phase, boss.hp, boss.maxHp));
+            setBossPortrait(encounter.id, bossPortraitState(phaseDef(), boss.hp, boss.maxHp));
             applyBackgroundTheme(encounter.id);
 
             // Make the current URL shareable/refreshable
@@ -342,8 +349,7 @@ function connect() {
             bossBullets = [];
             bossMissiles = [];
             bossLightning = [];
-            lastBossAttack = 0;
-            bossAngleOffset = 0;
+            mechState = {};
             setBossPortrait(encounter.id, 'base');
             applyBackgroundTheme(encounter.id);
             updateHostControls();
@@ -387,23 +393,23 @@ function connect() {
 
             boss = { ...boss, ...data.boss };
             wind = data.wind || { x: 0, y: 0, umbrella: true };
+            const newPhaseIndex = data.phase || 0;
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
-            if (phase === 4 && (data.phase || 1) === 1) myPos = null;
-            // Any transition back to phase 1 means the encounter was reset
-            // (mid-fight restart, post-victory restart, or an automatic team
-            // wipe) — bombardment's earned difficulty bonuses shouldn't carry
-            // over into a fresh fight.
-            if (phase !== 1 && (data.phase || 1) === 1) {
-                bombardmentMissileBonus = 0;
-                bombardmentLineBonus = 0;
-            }
-            phase = data.phase || 1;
-            setBossPortrait(encounter.id, bossPortraitState(phase, boss.hp, boss.maxHp));
+            if (phaseDef().victory && newPhaseIndex === 0) myPos = null;
+            // Any transition back to the opening phase means the encounter
+            // was reset (mid-fight restart, post-victory restart, or an
+            // automatic team wipe) — mechanic scratch state like
+            // bombardment's earned difficulty ratchet shouldn't carry over
+            // into a fresh fight.
+            if (phaseIndex !== 0 && newPhaseIndex === 0) mechState = {};
+            phaseIndex = newPhaseIndex;
+            setBossPortrait(encounter.id, bossPortraitState(phaseDef(), boss.hp, boss.maxHp));
             orbs = data.orbs || [];
-            document.getElementById('victory-banner').style.display = phase === 4 ? 'block' : 'none';
-            document.getElementById('restart-btn').style.display = phase === 4 && isHost ? 'inline-block' : 'none';
-            document.getElementById('victory-waiting').style.display = phase === 4 && !isHost ? 'block' : 'none';
+            const victorious = !!phaseDef().victory;
+            document.getElementById('victory-banner').style.display = victorious ? 'block' : 'none';
+            document.getElementById('restart-btn').style.display = victorious && isHost ? 'inline-block' : 'none';
+            document.getElementById('victory-waiting').style.display = victorious && !isHost ? 'block' : 'none';
 
             if (data.paused !== undefined && data.paused !== paused) {
                 paused = data.paused;
@@ -655,9 +661,9 @@ function updateAllyBullets() {
         b.y += b.dy;
 
         let hit = false;
-        if (phase === 1 || phase === 3) {
+        if (phaseDef().bossDamageable) {
             hit = Math.hypot(b.x - boss.x, b.y - boss.y) < boss.radius;
-        } else if (phase === 2) {
+        } else if (phaseDef().orbsDamageable) {
             hit = orbs.some(orb => orb.hp > 0 && Math.hypot(b.x - orb.x, b.y - orb.y) < ORB_RADIUS);
         }
         if (hit) {
@@ -672,9 +678,9 @@ function updateAllyBullets() {
 
 // Whether storm's umbrella is currently standing on the field — it vanishes
 // during a strong gust (wind.umbrella === false, see the gust calc in
-// server.js), which the rain density below also reacts to.
+// server.js), which the rain density (see the storm mechanic) also reacts to.
 function stormUmbrellaActive() {
-    return encounter.pattern === 'storm' && (phase === 1 || phase === 3) && wind.umbrella !== false;
+    return phaseDef().mechanic === 'storm' && wind.umbrella !== false;
 }
 
 function updateLocalCombat(now, myPos, alive) {
@@ -703,72 +709,26 @@ function updateLocalCombat(now, myPos, alive) {
 
     // Local boss attack simulation (cosmetic/local only, not synced across
     // clients). Runs regardless of `alive` so a dead/spectating player still
-    // sees the fight play out. Attack rate/pattern comes from the encounter.
-    // Phase 3 (chase) falls through to the same ring pattern as phase 1 —
-    // it just now fires from wherever the roaming boss currently is — with
-    // the server separately relaying aimed shots via 'bossAimedShot'.
-    if (phase === 4) {
-        bossBullets.length = 0; // defeated boss stops shooting immediately
-        bossMissiles.length = 0;
-        bossLightning.length = 0;
-    } else if (phase === 2) {
-        // The orbs take over the shooting during the co-op phase
-        if (now - lastBossAttack > encounter.attackRate * 2) {
-            lastBossAttack = now;
-            for (const orb of orbs) {
-                if (orb.hp > 0) circularAttack(orb, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
-            }
-            bossAngleOffset += 0.15;
-        }
-    } else if (boss.x !== undefined && now - lastBossAttack > encounter.attackRate) {
-        lastBossAttack = now;
-        // Each encounter has its own signature bullet pattern; 'ring' (the
-        // classic rotating circle + occasional big red ball) is the default.
-        switch (encounter.pattern) {
-            case 'spiral':
-                spiralAttack(boss, bossBullets, bossAngleOffset, encounter.arms, encounter.bulletSpeed);
-                bossAngleOffset += 0.23;
-                break;
-            case 'wave':
-                waveAttack(boss, bossBullets, now, encounter.bulletSpeed, encounter.fanCount);
-                break;
-            case 'rain':
-                rainAttack(bossBullets, encounter.bulletSpeed, encounter.drops);
-                break;
-            case 'storm': {
-                // Dense rain while the umbrella can shelter you from it;
-                // fades to a drizzle while a gust has it blown away, so
-                // being briefly exposed doesn't feel unfair.
-                const sheltered = wind.umbrella !== false;
-                const drops = sheltered ? encounter.drops : Math.max(2, Math.round(encounter.drops / 3));
-                const speed = sheltered ? encounter.bulletSpeed : encounter.bulletSpeed * 0.6;
-                stormRainAttack(bossBullets, speed, drops, wind);
-                break;
-            }
-            case 'bombardment': {
-                const hpFraction = boss.hp / (boss.maxHp || 1);
-                // Ratchet upward only — see the bonus vars' declaration for why.
-                bombardmentMissileBonus = Math.max(bombardmentMissileBonus, Math.floor((1 - hpFraction) / 0.15));
-                bombardmentLineBonus = Math.max(bombardmentLineBonus, Math.floor((1 - hpFraction) / 0.10));
-                bombardmentAttack(bossMissiles, now, 1 + bombardmentMissileBonus, 1 + bombardmentLineBonus);
-                break;
-            }
-            default:
-                circularAttack(boss, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
-                bossAngleOffset += 0.1;
-                if (Math.random() < encounter.bigRedChance) {
-                    bigRedBallAttack(boss, bossBullets);
-                }
-        }
-    }
-
-    // Storm lightning strikes on its own cadence, independent of the rain
-    // droplet rate above — randomized a little each time so gusts of bolts
-    // don't fall into a predictable rhythm.
-    if (encounter.pattern === 'storm' && (phase === 1 || phase === 3) && now - lastLightning > lightningInterval) {
-        lastLightning = now;
-        lightningInterval = 1400 + Math.random() * 1400;
-        lightningAttack(bossLightning, now);
+    // sees the fight play out. The active phase names which mechanic fires
+    // (see mechanics.js) — an enrage chase phase typically reuses the main
+    // fight's mechanic, just firing from wherever the roaming boss currently
+    // is, with the server separately relaying aimed shots via 'bossAimedShot'.
+    const def = phaseDef();
+    const mechanic = MECHANICS[def.mechanic] || MECHANICS.ring;
+    // boss.x is only undefined before the first join payload lands; hold off
+    // spawning until then ('none' runs regardless since it only clears).
+    if (boss.x !== undefined || def.mechanic === 'none') {
+        mechanic.update({
+            now,
+            state: mechState,
+            params: def.params || {},
+            boss,
+            orbs,
+            wind,
+            bossBullets,
+            bossMissiles,
+            bossLightning
+        });
     }
 
     // Update + collide player bullets against the current phase's target(s)
@@ -784,13 +744,13 @@ function updateLocalCombat(now, myPos, alive) {
         }
 
         let hit = false;
-        if (phase === 1 || phase === 3) {
+        if (def.bossDamageable) {
             if (Math.hypot(b.x - boss.x, b.y - boss.y) < boss.radius) {
                 addDamagePopup(b.x, b.y, 10, players[myId]?.color || 'white');
                 send({ type: 'bossDamage' });
                 hit = true;
             }
-        } else if (phase === 2) {
+        } else if (def.orbsDamageable) {
             for (const orb of orbs) {
                 if (orb.hp > 0 && Math.hypot(b.x - orb.x, b.y - orb.y) < ORB_RADIUS) {
                     addDamagePopup(b.x, b.y, 10, players[myId]?.color || 'white');
@@ -901,7 +861,7 @@ function updateLocalMovement(dt) {
     myPos.y += vy * PLAYER_SPEED_PER_SEC * dt;
 
     // Storm's wind keeps pushing everyone around even while standing still.
-    if (encounter.pattern === 'storm' && (phase === 1 || phase === 3)) {
+    if (phaseDef().wind) {
         myPos.x += wind.x * dt;
         myPos.y += wind.y * dt;
     }
@@ -941,10 +901,10 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase, stormUmbrellaActive());
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive());
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
-    updateBossBar(encounter, boss, phase, inGame);
+    updateBossBar(encounter, boss, phaseDef(), inGame);
     showBossDialogue(inGame);
     updateDiagnostics();
     requestAnimationFrame(gameLoop);

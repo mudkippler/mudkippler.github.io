@@ -3,6 +3,8 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const msgpack = require('@ygoe/msgpack');
+const { ENCOUNTERS } = require('./encounters');
+const { createPhaseEngine } = require('./phases');
 
 
 const app = express();
@@ -68,96 +70,6 @@ const LOBBY_MAX_PLAYERS = 8;
 // their own lobby instead of finding it gone.
 const EMPTY_LOBBY_TTL = 30000; // ms
 
-// Phase 2 co-op mechanic: both orbs must die within ORB_KILL_WINDOW of each
-// other or the dead one revives. Orb HP is sized so one player at max
-// reported DPS (BULLET_DAMAGE per DAMAGE_REPORT_MIN_INTERVAL = 200/s) needs
-// ~1.5s per orb — killing both sequentially can't fit the window, so it
-// takes two players focusing different orbs.
-const ORB_MAX_HP = 300;
-const ORB_KILL_WINDOW = 3000; // ms
-
-// Encounter definitions. bossMaxHp/hasOrbPhase/chase* are authoritative here;
-// the attack fields are forwarded to clients, which simulate boss bullets
-// locally. Every encounter ends with a phase-3 "enrage" chase: the boss
-// becomes mobile and periodically fires shots aimed at each living player's
-// current position (see startChasePhase / gameLoop), on top of its usual
-// ring pattern which keeps firing from wherever the boss currently is.
-const ENCOUNTERS = {
-  twin: {
-    id: 'twin', name: 'The Twin Guardian',
-    bossMaxHp: 2500, hasOrbPhase: true,
-    attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1,
-    chaseMaxHp: 800, chaseSpeed: 70, aimedShotInterval: 1400, aimedBulletSpeed: 3.2
-  },
-  // Slanting rain + telegraphed lightning strikes (see lightningAttack in
-  // attacks.js) instead of the default ring, plus wind that continuously
-  // pushes players around (see the wind block in gameLoop) — the rain's
-  // sideways drift follows the same wind vector so the whole sky visibly
-  // leans with the gusts. `drops` is the sheltered-phase density; the client
-  // thins it out on its own during a blown-away gust (see the 'storm' case
-  // in updateLocalCombat) since raising an umbrella is what makes this safe
-  // to run this dense in the first place.
-  storm: {
-    id: 'storm', name: 'Bullet Storm', pattern: 'storm',
-    bossMaxHp: 3500, hasOrbPhase: false,
-    attackRate: 45, drops: 9, bulletSpeed: 2.6, bigRedChance: 0,
-    chaseMaxHp: 600, chaseSpeed: 90, aimedShotInterval: 1000, aimedBulletSpeed: 3.6
-  },
-  blitz: {
-    id: 'blitz', name: 'Blitz',
-    bossMaxHp: 1500, hasOrbPhase: false,
-    attackRate: 55, numberOfAngles: 4, bulletSpeed: 2, bigRedChance: 0.05,
-    chaseMaxHp: 300, chaseSpeed: 110, aimedShotInterval: 800, aimedBulletSpeed: 4.2
-  },
-  // The three below each have a signature bullet pattern instead of the
-  // default rotating ring; `pattern` selects the attack in the client's
-  // updateLocalCombat and the extra fields are that pattern's knobs.
-  helix: {
-    id: 'helix', name: 'The Helix', pattern: 'spiral',
-    bossMaxHp: 2000, hasOrbPhase: false,
-    attackRate: 60, arms: 3, bulletSpeed: 1.6, bigRedChance: 0,
-    chaseMaxHp: 500, chaseSpeed: 80, aimedShotInterval: 1200, aimedBulletSpeed: 3.4
-  },
-  tide: {
-    id: 'tide', name: 'Tidal Warden', pattern: 'wave',
-    bossMaxHp: 2200, hasOrbPhase: false,
-    attackRate: 90, fanCount: 5, bulletSpeed: 1.8, bigRedChance: 0,
-    chaseMaxHp: 600, chaseSpeed: 75, aimedShotInterval: 1100, aimedBulletSpeed: 3.4
-  },
-  rain: {
-    id: 'rain', name: 'Acid Rain', pattern: 'rain',
-    bossMaxHp: 1800, hasOrbPhase: false,
-    attackRate: 45, drops: 3, bulletSpeed: 2.2, bigRedChance: 0,
-    chaseMaxHp: 500, chaseSpeed: 95, aimedShotInterval: 900, aimedBulletSpeed: 3.8
-  },
-  bombardment: {
-    id: 'bombardment', name: 'Bombardment', pattern: 'bombardment',
-    bossMaxHp: 5000, hasOrbPhase: false,
-    // attackRate is the gap between volleys, not between missiles within one
-    // — each volley is itself an extended sequence of telegraphed impacts
-    // (see bombardmentAttack in attacks.js), so this stays a slower cadence
-    // than the other patterns' per-bullet rate.
-    attackRate: 1400, bigRedChance: 0,
-    // No aimedShotInterval: bombardment's own escalating missile volleys
-    // already carry the phase-3 enrage, so the generic single targeted shot
-    // every other encounter gets is redundant here (see the phase-3 block in
-    // gameLoop, which skips firing it when this is falsy).
-    chaseMaxHp: 600, chaseSpeed: 85
-  }
-};
-
-// The boss wanders within these bounds during the chase phase — clear of the
-// bottom strip where players spawn/fight from and inset from the walls.
-const CHASE_BOUNDS = { xMin: 60, xMax: 740, yMin: 70, yMax: 430 };
-const CHASE_WAYPOINT_RADIUS = 20; // px; close enough counts as "arrived"
-
-function pickChaseWaypoint() {
-  return {
-    x: CHASE_BOUNDS.xMin + Math.random() * (CHASE_BOUNDS.xMax - CHASE_BOUNDS.xMin),
-    y: CHASE_BOUNDS.yMin + Math.random() * (CHASE_BOUNDS.yMax - CHASE_BOUNDS.yMin)
-  };
-}
-
 // 20 hand-picked hues, spread far apart in hue/lightness so adjacent players
 // are easy to tell apart at a glance. Avoids gray (the boss) and violet
 // (the orbs) to keep those readable as distinct entities.
@@ -212,12 +124,10 @@ function createLobby(encounterId) {
     emptyAt: null,
     wipeAt: null, // set when every player is dead; encounter resets shortly after
     players: {},
-    boss: { x: 400, y: 100, radius: 30, hp: encounter.bossMaxHp, maxHp: encounter.bossMaxHp },
-    // 1: boss health bar, 2: twin orbs (co-op check, twin only), 3: enrage
-    // chase (mobile boss + aimed shots), 4: defeated
-    phase: 1,
-    orbs: [], // {id, baseX, baseY, x, y, hp, maxHp, deadAt}
-    chase: null, // {waypoint: {x,y}, lastAimedShot} — set on entering phase 3
+    boss: { x: 400, y: 100, radius: 30, hp: encounter.phases[0].bossHp, maxHp: encounter.phases[0].bossHp },
+    phaseIndex: 0, // index into encounter.phases; the phase def is authoritative for what's damageable/active
+    phaseState: {}, // per-phase scratch for the phase's server behavior (see phases.js)
+    orbs: [], // {id, baseX, baseY, x, y, hp, maxHp, deadAt} — spawned/owned by the twinOrbs behavior
     damageLog: {}, // id -> {name, color, dmg}
     graves: [], // {x, y, color} markers left where players have died
     hpTaunts: new Set() // 'phase1-75'/'enrage-25'/etc — HP milestones already spoken this run
@@ -237,140 +147,20 @@ function bossSay(lobby, text, intensity = 0) {
   lobbyBroadcast(lobby, serialize({ type: 'bossSay', text, intensity }));
 }
 
-// Per-encounter dialogue at HP milestones, reused for both the main fight
-// (phase 1) and the phase-3 enrage chase — enrage gets more lines per
-// threshold and higher intensity (see HP_TAUNT_INTENSITY) so the boss visibly
-// unravels the closer it gets to death. `phase1[100]`/`enrage[100]` fire once
-// on entering that phase; 75/50/25 fire the first time HP crosses under them.
-const BOSS_LINES = {
-  twin: {
-    phase1: {
-      100: ["Two blades, one purpose. Let's dance."],
-      75: ["You're better than I expected."],
-      50: ["Impressive. Truly."],
-      25: ["...you're actually hurting me."]
-    },
-    enrage: {
-      75: ["I said ENOUGH!", "Both blades. No mercy now."],
-      50: ["I WILL NOT FALL TO THIS!", "Stand still and DIE!"],
-      25: ["This... isn't... POSSIBLE—", "I REFUSE! I REFUSE!!", "*the blades scream with him*"]
-    }
-  },
-  storm: {
-    phase1: {
-      100: ['Let the storm begin.'],
-      75: ['Just a drizzle so far.'],
-      50: ["Now you'll feel the real storm."],
-      25: ['The sky itself trembles...']
-    },
-    enrage: {
-      75: ['THUNDER ANSWERS ME!', 'You woke the storm, fool!'],
-      50: ['I AM THE STORM!', 'NOWHERE TO HIDE NOW!'],
-      25: ['t-the storm... is breaking apart—', 'NO! NO!! NOOOO!', '*lightning crackles wildly*']
-    }
-  },
-  blitz: {
-    phase1: {
-      100: ['Fast. Furious. Fatal. Try to keep up.'],
-      75: ['Too slow!'],
-      50: ['Getting warmer, aren’t I?'],
-      25: ['Alright — no more playing around.']
-    },
-    enrage: {
-      75: ['FULL THROTTLE!', "Burn faster than you can blink!"],
-      50: ["I'M UNSTOPPABLE!!", 'CAN’T. CATCH. ME.'],
-      25: ["m-my flame's... flickering—", "I WON'T BURN OUT HERE!", '*the fire roars unevenly*']
-    }
-  },
-  helix: {
-    phase1: {
-      100: ['Round and round you’ll go.'],
-      75: ['Dizzy yet?'],
-      50: ['The spiral tightens.'],
-      25: ["You're unraveling me..."]
-    },
-    enrage: {
-      75: ['THE PATTERN BREAKS FREE!', 'Spin with me — FOREVER!'],
-      50: ['I AM THE VORTEX!', 'EVERYTHING FALLS INWARD!'],
-      25: ["the spiral's... collapsing—", 'HOLD TOGETHER, HOLD—', '*reality warps and stutters*']
-    }
-  },
-  tide: {
-    phase1: {
-      100: ['The tide answers to no one.'],
-      75: ['A ripple, nothing more.'],
-      50: ['The waters rise against you.'],
-      25: ["You've breached the seawall..."]
-    },
-    enrage: {
-      75: ['THE FLOOD COMES FOR YOU!', 'Drown in my fury!'],
-      50: ['I AM THE DEEP ITSELF!', 'THE TIDE NEVER STOPS!'],
-      25: ['the waters... are receding—', 'NO! STAY! STAY WITH ME!', '*the tide howls and crashes*']
-    }
-  },
-  rain: {
-    phase1: {
-      100: ['Hope you brought an umbrella.'],
-      75: ['Just the first drops.'],
-      50: ['It burns more with every drop, doesn’t it?'],
-      25: ['The clouds are thinning...']
-    },
-    enrage: {
-      75: ['A DOWNPOUR OF PAIN!', 'Let it ALL corrode!'],
-      50: ['I AM THE STORMCLOUD!', 'NOTHING SURVIVES THE RAIN!'],
-      25: ['the clouds... are dissolving—', "I WON'T DRY UP! I WON'T!", '*the acid hisses erratically*']
-    }
-  },
-  bombardment: {
-    phase1: {
-      100: ['Brace yourselves. Impact incoming.'],
-      75: ['First volley — barely a scratch.'],
-      50: ['Auxiliary silos online - doubling payloads.'],
-      25: ["Disable safety protocols."]
-    },
-    enrage: {
-      75: ['FULL BOMBARDMENT — NO SURVIVORS!', "Everything I've got. NOW!"],
-      50: ["I WON'T STOP FIRING!!", 'SATURATE THE FIELD!'],
-      25: ["m-my arsenal's... failing—", 'ONE MORE VOLLEY! JUST ONE MORE!', 'AHAHAHAHAHAHAH!!!!']
-    }
-  }
-};
-const DEFAULT_BOSS_LINES = {
-  phase1: { 100: ["Let's begin."], 75: ['Not bad.'], 50: ["You're doing well."], 25: ["I'm actually struggling..."] },
-  enrage: {
-    75: ['ENOUGH OF THIS!', 'No more holding back!'],
-    50: ["I WON'T LOSE HERE!", 'MOVE, MOVE, MOVE—'],
-    25: ["n-no... this can't—", 'I REFUSE TO FALL!!', '*a scream of static and rage*']
-  }
-};
+// Drives each lobby through its encounter's phase list — phase entry/exit,
+// HP-milestone dialogue, and the per-tick boss behaviors all live in
+// phases.js; the encounter/phase data itself lives in encounters.js.
+const phases = createPhaseEngine({
+  say: bossSay,
+  emit: (lobby, message) => lobbyBroadcast(lobby, serialize(message)),
+  t
+});
 
-// 1 (barely rattled) through 6 (total meltdown) — drives the client's
-// escalating dialogue-box styling (font/color/size/shake).
-const HP_TAUNT_INTENSITY = { 'phase1-75': 1, 'phase1-50': 2, 'phase1-25': 3, 'enrage-75': 4, 'enrage-50': 5, 'enrage-25': 6 };
-
-// Fires the encounter's line for the phase's 100% milestone (call once, right
-// as phase 1 or the enrage chase begins).
-function bossSayPhaseStart(lobby, phaseKey) {
-  const pool = (BOSS_LINES[lobby.encounter.id] || DEFAULT_BOSS_LINES)[phaseKey];
-  const lines = pool && pool[100];
-  if (lines && lines.length) bossSay(lobby, lines[Math.floor(Math.random() * lines.length)], phaseKey === 'enrage' ? 3 : 0);
-}
-
-// Checks the boss's current HP against the 75/50/25% milestones for whichever
-// phase it's currently in and fires (once each) the first time HP crosses
-// under one. Call after any change to lobby.boss.hp during phase 1 or 3.
-function checkHpTaunts(lobby) {
-  const phaseKey = lobby.phase === 3 ? 'enrage' : lobby.phase === 1 ? 'phase1' : null;
-  if (!phaseKey) return;
-  const pct = (lobby.boss.hp / (lobby.boss.maxHp || 1)) * 100;
-  const pool = (BOSS_LINES[lobby.encounter.id] || DEFAULT_BOSS_LINES)[phaseKey];
-  for (const threshold of [75, 50, 25]) {
-    const key = `${phaseKey}-${threshold}`;
-    if (pct > threshold || lobby.hpTaunts.has(key)) continue;
-    lobby.hpTaunts.add(key);
-    const lines = pool && pool[threshold];
-    if (lines && lines.length) bossSay(lobby, lines[Math.floor(Math.random() * lines.length)], HP_TAUNT_INTENSITY[key]);
-  }
+// The encounter object forwarded to clients on join/change: the same phase
+// list the server runs, minus the dialogue tables — those are only ever
+// spoken via bossSay, and dropping them keeps the join payload lean.
+function publicEncounter(encounter) {
+  return { ...encounter, phases: encounter.phases.map(({ say, ...phase }) => phase) };
 }
 
 function publicOrbs(lobby) {
@@ -388,28 +178,17 @@ function broadcastLobbyState(lobby) {
   }));
 }
 
-// Boss HP scales linearly with headcount (double for 2 players, triple for
-// 3, ...) so the fight stays roughly as hard per-player regardless of party
-// size. Read at each phase transition (fight start, restart, entering the
-// enrage chase) rather than continuously, so a player joining/leaving
-// mid-fight doesn't retroactively rescale HP already in progress.
-function playerCount(lobby) {
-  return Math.max(1, Object.keys(lobby.players).length);
-}
-
-// Resets an in-progress or finished encounter back to phase 1 with full boss
-// HP and every player alive at full health. Used both for the automatic
-// team-wipe recovery and a host-triggered restart after victory.
+// Resets an in-progress or finished encounter back to its opening phase with
+// full boss HP and every player alive at full health. Used both for the
+// automatic team-wipe recovery and a host-triggered restart after victory.
 function resetEncounter(lobby) {
   lobby.wipeAt = null;
   lobby.boss.x = 400;
   lobby.boss.y = 100;
-  lobby.boss.maxHp = lobby.encounter.bossMaxHp * playerCount(lobby); // chase phase may have shrunk this
-  lobby.boss.hp = lobby.boss.maxHp;
-  lobby.phase = 1;
-  lobby.orbs = [];
-  lobby.chase = null;
   lobby.hpTaunts = new Set();
+  // silent: the reset paths speak their own line ('back for another beating?')
+  // instead of re-firing the phase's entry dialogue.
+  phases.enterPhase(lobby, 0, { silent: true });
   for (const id in lobby.players) {
     const p = lobby.players[id];
     const spawn = spawnPosition();
@@ -420,28 +199,6 @@ function resetEncounter(lobby) {
     p.y = spawn.y;
     p.keys = {};
   }
-}
-
-function startPhase2(lobby) {
-  lobby.phase = 2;
-  lobby.orbs = [0, 1].map(i => {
-    const x = lobby.boss.x + (i === 0 ? -150 : 150);
-    const y = lobby.boss.y + 50;
-    return { id: i, baseX: x, baseY: y, x, y, hp: ORB_MAX_HP, maxHp: ORB_MAX_HP, deadAt: null };
-  });
-  bossSay(lobby, "i'm just getting started..");
-}
-
-// Phase 3: the boss's last stand. It gets a fresh HP pool, starts roaming
-// the arena instead of sitting still, and periodically fires shots aimed at
-// each living player's position on top of its usual ring pattern.
-function startChasePhase(lobby, taunt) {
-  lobby.phase = 3;
-  lobby.orbs = [];
-  lobby.boss.maxHp = lobby.encounter.chaseMaxHp * playerCount(lobby);
-  lobby.boss.hp = lobby.boss.maxHp;
-  lobby.chase = { waypoint: pickChaseWaypoint(), lastAimedShot: Date.now() };
-  bossSay(lobby, taunt, 3);
 }
 
 function sanitizeName(raw) {
@@ -468,7 +225,11 @@ function joinLobby(ws, lobby, rawName) {
     color: PLAYER_COLORS[colorIndex],
     keys: {},
     lastActive: Date.now(),
-    lastDamageReport: 0,
+    // Damage dealt (boss/orb) and damage taken are throttled separately so a
+    // damage-over-time hazard ticking against the player can't starve their
+    // own hit reports out of the anti-spam window (or vice versa).
+    lastDealtReport: 0,
+    lastTakenReport: 0,
     lastChat: 0,
     lastShotRelay: 0,
     lastPosReport: 0, // ms timestamp of the last accepted client position report
@@ -492,10 +253,10 @@ function joinLobby(ws, lobby, rawName) {
     code: lobby.code,
     hostId: lobby.hostId,
     started: lobby.started,
-    encounter: lobby.encounter,
+    encounter: publicEncounter(lobby.encounter),
     boss: { ...lobby.boss, x: t(lobby.boss.x), y: t(lobby.boss.y) },
     graves: lobby.graves,
-    phase: lobby.phase,
+    phase: lobby.phaseIndex,
     orbs: publicOrbs(lobby),
     paused: lobby.paused
   }));
@@ -561,13 +322,12 @@ wss.on('connection', (ws) => {
       if (data.type === 'startGame') {
         if (ws.id !== lobby.hostId || lobby.started) return;
         lobby.started = true;
-        // Scale HP for however many players are actually here now — createLobby
-        // set it assuming just the host, since others may have joined since.
-        lobby.boss.maxHp = lobby.encounter.bossMaxHp * playerCount(lobby);
-        lobby.boss.hp = lobby.boss.maxHp;
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
-        bossSayPhaseStart(lobby, 'phase1');
+        // Re-enter the opening phase: createLobby sized boss HP assuming just
+        // the host, and enterPhase rescales it for everyone who joined since
+        // (plus fires the phase's entry line).
+        phases.enterPhase(lobby, 0);
       } else if (data.type === 'togglePause') {
         if (ws.id !== lobby.hostId || !lobby.started) return;
         lobby.paused = !lobby.paused;
@@ -583,7 +343,7 @@ wss.on('connection', (ws) => {
         lobby.paused = false;
         resetEncounter(lobby);
         bossSay(lobby, 'back for another beating?');
-        lobbyBroadcast(lobby, serialize({ type: 'encounterChanged', encounter: lobby.encounter }));
+        lobbyBroadcast(lobby, serialize({ type: 'encounterChanged', encounter: publicEncounter(lobby.encounter) }));
       } else if (data.type === 'movementUpdate') {
         player.keys = { ...player.keys, ...data.keys };
         player.lastActive = Date.now();
@@ -606,7 +366,7 @@ wss.on('connection', (ws) => {
           // Storm's wind can push a player well beyond their own top speed —
           // give the cap extra slack matching the wind's max strength so a
           // legitimate gust-blown report doesn't get rejected as a teleport.
-          const windSlack = lobby.encounter.pattern === 'storm' ? WIND_MAX_STRENGTH * elapsed * 1.5 : 0;
+          const windSlack = phases.currentPhase(lobby).wind ? WIND_MAX_STRENGTH * elapsed * 1.5 : 0;
           const maxDist = PLAYER_SPEED_PER_SEC * elapsed * 1.5 + 2 + windSlack;
           const nx = Math.max(0, Math.min(800, data.x));
           const ny = Math.max(0, Math.min(600, data.y));
@@ -617,51 +377,39 @@ wss.on('connection', (ws) => {
           }
         }
       } else if (data.type === 'bossDamage') {
-        // Damageable in phase 1 (main fight) and phase 3 (enrage chase);
-        // invulnerable during the orb phase and once already defeated.
-        if (!lobby.started || (lobby.phase !== 1 && lobby.phase !== 3)) return;
+        // Which phases leave the boss damageable is part of the phase data —
+        // e.g. it's invulnerable during the orb phase and once defeated.
+        if (!lobby.started || !phases.currentPhase(lobby).bossDamageable) return;
         const now = Date.now();
-        if (now - player.lastDamageReport < DAMAGE_REPORT_MIN_INTERVAL) return;
-        player.lastDamageReport = now;
+        if (now - player.lastDealtReport < DAMAGE_REPORT_MIN_INTERVAL) return;
+        player.lastDealtReport = now;
 
         lobby.boss.hp = Math.max(0, lobby.boss.hp - BULLET_DAMAGE);
         lobby.damageLog[ws.id].dmg += BULLET_DAMAGE;
-        checkHpTaunts(lobby);
+        phases.checkHpTaunts(lobby);
 
-        if (lobby.boss.hp <= 0) {
-          if (lobby.phase === 3) {
-            lobby.phase = 4;
-            lobby.chase = null;
-            bossSay(lobby, 'impossible... you actually got me...');
-          } else if (lobby.encounter.hasOrbPhase) {
-            startPhase2(lobby);
-          } else {
-            startChasePhase(lobby, "you think that's the end of me?!");
-          }
-        }
+        if (lobby.boss.hp <= 0) phases.trigger(lobby, 'bossHpZero');
       } else if (data.type === 'orbDamage') {
-        if (!lobby.started || lobby.phase !== 2) return;
+        if (!lobby.started || !phases.currentPhase(lobby).orbsDamageable) return;
         const now = Date.now();
-        if (now - player.lastDamageReport < DAMAGE_REPORT_MIN_INTERVAL) return;
+        if (now - player.lastDealtReport < DAMAGE_REPORT_MIN_INTERVAL) return;
 
         const orb = lobby.orbs.find(o => o.id === data.orbId);
         if (!orb || orb.hp <= 0) return;
-        player.lastDamageReport = now;
+        player.lastDealtReport = now;
 
         orb.hp = Math.max(0, orb.hp - BULLET_DAMAGE);
         lobby.damageLog[ws.id].dmg += BULLET_DAMAGE;
 
         if (orb.hp <= 0) {
           orb.deadAt = now;
-          if (lobby.orbs.every(o => o.hp <= 0)) {
-            startChasePhase(lobby, 'impossible... you struck as one... but I am not finished!');
-          }
+          if (lobby.orbs.every(o => o.hp <= 0)) phases.trigger(lobby, 'orbsDead');
         }
       } else if (data.type === 'playerDamage') {
         if (!lobby.started || player.dead) return;
         const now = Date.now();
-        if (now - player.lastDamageReport < DAMAGE_REPORT_MIN_INTERVAL) return;
-        player.lastDamageReport = now;
+        if (now - player.lastTakenReport < DAMAGE_REPORT_MIN_INTERVAL) return;
+        player.lastTakenReport = now;
 
         // The client only reports *that* it was hit and by what — the amount
         // is still fixed server-side per source so a client can't self-report
@@ -782,8 +530,8 @@ function gameLoop() {
       // smoothly gusts over time rather than flipping instantly. Computed
       // server-side and broadcast as the actual x/y push (not the formula)
       // so every client's local prediction agrees on the same gusts without
-      // needing clock sync. Only relevant during the main fight/enrage chase.
-      if (lobby.encounter.pattern === 'storm' && (lobby.phase === 1 || lobby.phase === 3)) {
+      // needing clock sync. Only runs during phases flagged for it.
+      if (phases.currentPhase(lobby).wind) {
         const wt = now / 1000;
         const windAngle = Math.sin(wt * 0.15) * 1.0 + Math.sin(wt * 0.37) * 0.4;
         const gust = Math.pow(0.5 + 0.5 * Math.sin(wt * 0.5), 6); // occasional strong pulses, mostly calm between
@@ -856,55 +604,9 @@ function gameLoop() {
         }
       }
 
-      // Phase 2: bob the orbs and enforce the kill-together window
-      if (lobby.phase === 2) {
-        for (const orb of lobby.orbs) {
-          orb.y = orb.baseY + Math.sin(now / 400 + orb.id * Math.PI) * 15;
-        }
-
-        const dead = lobby.orbs.filter(o => o.hp <= 0);
-        if (dead.length === 1 && now - dead[0].deadAt > ORB_KILL_WINDOW) {
-          dead[0].hp = dead[0].maxHp;
-          dead[0].deadAt = null;
-          bossSay(lobby, 'you must strike them down together!');
-        }
-      }
-
-      // Phase 3: the boss roams the arena toward a wandering waypoint and
-      // periodically fires shots aimed at each living player's current spot.
-      // Those shots don't home in after firing, so moving away from where you
-      // were when the volley fired is enough to dodge.
-      if (lobby.phase === 3 && lobby.chase) {
-        const chase = lobby.chase;
-        const dx = chase.waypoint.x - lobby.boss.x;
-        const dy = chase.waypoint.y - lobby.boss.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < CHASE_WAYPOINT_RADIUS) {
-          chase.waypoint = pickChaseWaypoint();
-        } else {
-          lobby.boss.x += (dx / dist) * lobby.encounter.chaseSpeed * dt;
-          lobby.boss.y += (dy / dist) * lobby.encounter.chaseSpeed * dt;
-        }
-        lobby.boss.x = Math.max(CHASE_BOUNDS.xMin, Math.min(CHASE_BOUNDS.xMax, lobby.boss.x));
-        lobby.boss.y = Math.max(CHASE_BOUNDS.yMin, Math.min(CHASE_BOUNDS.yMax, lobby.boss.y));
-
-        // Some encounters (bombardment) opt out of the generic targeted shot
-        // entirely — aimedShotInterval is absent/falsy for those.
-        if (lobby.encounter.aimedShotInterval && now - chase.lastAimedShot > lobby.encounter.aimedShotInterval) {
-          chase.lastAimedShot = now;
-          const targets = Object.values(lobby.players)
-            .filter(p => !p.dead)
-            .map(p => ({ x: t(p.x), y: t(p.y) }));
-          if (targets.length > 0) {
-            lobbyBroadcast(lobby, serialize({
-              type: 'bossAimedShot',
-              origin: { x: t(lobby.boss.x), y: t(lobby.boss.y) },
-              targets,
-              speed: lobby.encounter.aimedBulletSpeed
-            }));
-          }
-        }
-      }
+      // The active phase's server-side behavior: orb bobbing/kill-window,
+      // the enrage chase's roaming + aimed shots, etc. (see phases.js).
+      phases.update(lobby, now, dt);
     }
 
     // Send game state: positions/health, boss health, and phase/orbs. No bullets.
@@ -915,7 +617,7 @@ function gameLoop() {
         dead: p.dead, revive: p.dead ? t(p.reviveProgress / REVIVE_TIME) : 0
       })),
       boss: { x: t(lobby.boss.x), y: t(lobby.boss.y), hp: lobby.boss.hp, maxHp: lobby.boss.maxHp },
-      phase: lobby.phase,
+      phase: lobby.phaseIndex,
       orbs: publicOrbs(lobby),
       paused: lobby.paused,
       // Omitted entirely outside storm's wind-active phases to save bytes on

@@ -1,8 +1,8 @@
-// E2E coverage of phase 3, the boss's "enrage chase": entered either by
+// E2E coverage of the boss's "enrage chase" phase: entered either by
 // depleting the main boss HP (no-orb encounters) or by clearing both twin
 // orbs together, it gives the boss a fresh HP pool, makes it roam the arena,
 // and has it periodically fire shots aimed at each living player's position.
-const { check, finish, makeClient, sleep, kill } = require('./helpers');
+const { check, finish, makeClient, sleep, kill, phaseIndex } = require('./helpers');
 
 async function damageBossUntil(client, predicate, maxHits = 220) {
   for (let i = 0; i < maxHits; i++) {
@@ -26,15 +26,16 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
   await host.waitFor('gameStart');
   await host.waitFor('state');
 
-  const chaseState = await damageBossUntil(host, s => s.phase === 3);
-  check(chaseState.phase === 3, `depleting main boss HP enters phase 3 (was ${chaseState.phase})`);
-  check(chaseState.boss.maxHp === 300, `chase phase uses blitz's chase HP pool (300), got ${chaseState.boss.maxHp}`);
+  const BLITZ_ENRAGE = phaseIndex('blitz', 'enrage');
+  const chaseState = await damageBossUntil(host, s => s.phase === BLITZ_ENRAGE);
+  check(chaseState.phase === BLITZ_ENRAGE, `depleting main boss HP enters the enrage chase (phase was ${chaseState.phase})`);
+  check(chaseState.boss.maxHp === 300, `chase phase uses blitz's enrage HP pool (300), got ${chaseState.boss.maxHp}`);
   // Allow a little slack: the test's damage cadence can land another hit or
-  // two before the client observes the phase-3 transition broadcast, same as
+  // two before the client observes the enrage transition broadcast, same as
   // it would for any player attacking continuously through the transition.
   check(chaseState.boss.hp > chaseState.boss.maxHp - 30, `chase phase boss starts near full chase HP (${chaseState.boss.hp}/${chaseState.boss.maxHp})`);
 
-  // Boss should still be damageable in phase 3
+  // Boss should still be damageable during the enrage chase
   const beforeHp = host.lastState().boss.hp;
   host.send({ type: 'bossDamage' });
   await sleep(200);
@@ -84,10 +85,12 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
   await twinHost.waitFor('gameStart');
   await twinHost.waitFor('state');
 
-  // Get through phase 1 into phase 2 (orbs) — twin has 5000 HP, so this
-  // needs a much higher hit cap than the default (sized for blitz's 1500).
-  await damageBossUntil(twinHost, s => s.phase === 2, 550);
-  check(twinHost.lastState().phase === 2, 'twin boss depletion enters the orb phase (2) as before');
+  // Get through the main phase into the orb phase — twin has 5000 HP at two
+  // players, so this needs a much higher hit cap than the default (sized for
+  // blitz's 1500).
+  const TWIN_ORBS = phaseIndex('twin', 'orbs');
+  await damageBossUntil(twinHost, s => s.phase === TWIN_ORBS, 550);
+  check(twinHost.lastState().phase === TWIN_ORBS, 'twin boss depletion enters the orb phase as before');
 
   // Killing one orb takes ~1.5s at one player's max reported DPS, and the
   // kill-together window is only 3s — a single player can't clear both
@@ -99,9 +102,9 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
   ]);
   await sleep(300);
   const twinChaseState = twinHost.lastState();
-  check(twinChaseState.phase === 3, `clearing both twin orbs together enters phase 3 (was ${twinChaseState.phase})`);
+  check(twinChaseState.phase === phaseIndex('twin', 'enrage'), `clearing both twin orbs together enters the enrage chase (phase was ${twinChaseState.phase})`);
   // Two players in this lobby: boss HP scales linearly with headcount.
-  check(twinChaseState.boss.maxHp === 1600, `twin's chase phase uses its own chase HP pool (800 x2 players=1600), got ${twinChaseState.boss.maxHp}`);
+  check(twinChaseState.boss.maxHp === 1600, `twin's enrage chase uses its own HP pool (800 x2 players=1600), got ${twinChaseState.boss.maxHp}`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });
