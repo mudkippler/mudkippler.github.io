@@ -1,3 +1,5 @@
+import { MISSILE_EXPLOSION_DURATION } from './attacks.js';
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
@@ -33,7 +35,46 @@ function drawGravestone(x, y, color) {
     ctx.fillRect(x - w / 2, y + h / 2 - 3, w, 3);
 }
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, boss, damagePopups, graves, orbs, phase) {
+// Bombardment hazards: a pulsing telegraph ring while the missile is still
+// airborne — the shadow inside it fills in as impact approaches, so the
+// warning is most solid right when it matters — then a bright ring that
+// expands and fades once it lands.
+function drawMissiles(missiles) {
+    const now = performance.now();
+    for (const m of missiles) {
+        if (!m.exploded) {
+            const total = m.impactTime - m.spawnTime;
+            const remainingFrac = total > 0 ? Math.max(0, Math.min(1, (m.impactTime - now) / total)) : 0;
+            const dangerFrac = 1 - remainingFrac; // 0 at launch, 1 right at impact
+
+            ctx.globalAlpha = (0.35 + 0.25 * dangerFrac) + 0.2 * Math.sin(now / 90);
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.globalAlpha = 0.25 + 0.45 * dangerFrac;
+            ctx.fillStyle = '#ff8844';
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, m.radius * dangerFrac, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            const p = Math.min(1, (now - m.explodedAt) / MISSILE_EXPLOSION_DURATION);
+            ctx.globalAlpha = 1 - p;
+            ctx.strokeStyle = '#ffaa33';
+            ctx.lineWidth = 5 * (1 - p) + 1;
+            ctx.beginPath();
+            ctx.arc(m.x, m.y, m.radius * p, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+    ctx.globalAlpha = 1;
+}
+
+export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, boss, damagePopups, graves, orbs, phase) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Old permanent grave markers are hidden for now — death is revivable,
@@ -168,6 +209,8 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, boss, dam
         ctx.arc(b.x, b.y, style.size, 0, Math.PI * 2);
         ctx.fill();
     }
+
+    drawMissiles(bossMissiles);
 
     // Damage Popups
     for (let i = damagePopups.length - 1; i >= 0; i--) {

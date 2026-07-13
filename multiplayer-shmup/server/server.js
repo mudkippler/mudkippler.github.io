@@ -117,6 +117,16 @@ const ENCOUNTERS = {
     bossMaxHp: 1800, hasOrbPhase: false,
     attackRate: 45, drops: 3, bulletSpeed: 2.2, bigRedChance: 0,
     chaseMaxHp: 500, chaseSpeed: 95, aimedShotInterval: 900, aimedBulletSpeed: 3.8
+  },
+  bombardment: {
+    id: 'bombardment', name: 'Bombardment', pattern: 'bombardment',
+    bossMaxHp: 2400, hasOrbPhase: false,
+    // attackRate is the gap between volleys, not between missiles within one
+    // — each volley is itself an extended sequence of telegraphed impacts
+    // (see bombardmentAttack in attacks.js), so this stays a slower cadence
+    // than the other patterns' per-bullet rate.
+    attackRate: 1400, bigRedChance: 0,
+    chaseMaxHp: 600, chaseSpeed: 85, aimedShotInterval: 1100, aimedBulletSpeed: 3.4
   }
 };
 

@@ -83,3 +83,40 @@ export function rainAttack(bossBullets, bulletVelocity = 2.2, drops = 3) {
         });
     }
 }
+
+// A volley of missiles fired offscreen that land in a line, one after
+// another, each telegraphing its landing spot before it impacts. Unlike the
+// other attacks these aren't moving projectiles — they're timed hazards, so
+// the caller (updateBossMissiles in client.js) drives them by wall-clock time
+// rather than per-frame dx/dy. The volley grows by one missile for every 15%
+// of the boss's HP already lost, so the bombardment escalates as the fight
+// goes on.
+export const MISSILE_BLAST_RADIUS = 45; // px, final ring size — also the telegraph's footprint
+export const MISSILE_EXPLOSION_DURATION = 300; // ms the ring stays out (and stays a hitbox) after impact
+
+export function bombardmentAttack(boss, missiles, now, hpFraction, arena = { xMin: 80, xMax: 720, yMin: 380, yMax: 560 }) {
+    const missileCount = 1 + Math.floor((1 - hpFraction) / 0.15);
+    const spacing = 70; // px between impact points along the line
+    const lineWidth = (missileCount - 1) * spacing;
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const startX = arena.xMin + Math.random() * Math.max(1, (arena.xMax - arena.xMin) - lineWidth);
+    const y = arena.yMin + Math.random() * (arena.yMax - arena.yMin);
+
+    const LAUNCH_TO_IMPACT = 900; // ms a missile is airborne/offscreen before landing
+    const STAGGER = 220; // ms between each missile's impact within the volley
+
+    for (let i = 0; i < missileCount; i++) {
+        const x = dir === 1 ? startX + i * spacing : startX + lineWidth - i * spacing;
+        missiles.push({
+            id: bulletIdCounter++,
+            x,
+            y,
+            radius: MISSILE_BLAST_RADIUS,
+            spawnTime: now,
+            impactTime: now + LAUNCH_TO_IMPACT + i * STAGGER,
+            exploded: false,
+            explodedAt: null,
+            hit: false
+        });
+    }
+}

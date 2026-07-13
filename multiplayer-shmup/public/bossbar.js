@@ -12,7 +12,8 @@ const FLAIR = {
     blitz: { icon: '🔥', color: '#ff6a3d' },
     helix: { icon: '🌀', color: '#e14dff' },
     tide: { icon: '🌊', color: '#4da6ff' },
-    rain: { icon: '☣', color: '#9dff4d' }
+    rain: { icon: '☣', color: '#9dff4d' },
+    bombardment: { icon: '💥', color: '#ff8844' }
 };
 const DEFAULT_FLAIR = { icon: '☠', color: '#ff6a3d' };
 

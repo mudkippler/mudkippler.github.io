@@ -3,7 +3,7 @@ import { updateHUD } from './hud.js';
 import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor } from './bossbar.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
-import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack } from './attacks.js';
+import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION } from './attacks.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -76,6 +76,7 @@ let myPos = null;
 let bullets = []; // local player bullets
 let allyBullets = []; // teammates' bullets, spawned from relayed shot origins
 let bossBullets = []; // local boss bullets
+let bossMissiles = []; // local bombardment telegraphs/explosions — timed hazards, not moving projectiles
 let bulletIdCounter = 0;
 let lastShot = 0;
 let lastBossAttack = 0;
@@ -316,6 +317,7 @@ function connect() {
             bullets = [];
             allyBullets = [];
             bossBullets = [];
+            bossMissiles = [];
             lastBossAttack = 0;
             bossAngleOffset = 0;
             updateHostControls();
@@ -654,6 +656,7 @@ function updateLocalCombat(now, myPos, alive) {
     // the server separately relaying aimed shots via 'bossAimedShot'.
     if (phase === 4) {
         bossBullets.length = 0; // defeated boss stops shooting immediately
+        bossMissiles.length = 0;
     } else if (phase === 2) {
         // The orbs take over the shooting during the co-op phase
         if (now - lastBossAttack > encounter.attackRate * 2) {
@@ -677,6 +680,9 @@ function updateLocalCombat(now, myPos, alive) {
                 break;
             case 'rain':
                 rainAttack(bossBullets, encounter.bulletSpeed, encounter.drops);
+                break;
+            case 'bombardment':
+                bombardmentAttack(boss, bossMissiles, now, boss.hp / (boss.maxHp || 1));
                 break;
             default:
                 circularAttack(boss, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
@@ -738,6 +744,32 @@ function updateLocalCombat(now, myPos, alive) {
             bossBullets.splice(i, 1);
         }
     }
+
+    // Bombardment missiles: timed hazards rather than moving projectiles.
+    // Each telegraphs its landing spot, then becomes a ring-shaped hitbox for
+    // MISSILE_EXPLOSION_DURATION once its impact time arrives.
+    for (let i = bossMissiles.length - 1; i >= 0; i--) {
+        const m = bossMissiles[i];
+        if (!m.exploded && now >= m.impactTime) {
+            m.exploded = true;
+            m.explodedAt = now;
+        }
+
+        if (m.exploded) {
+            const elapsed = now - m.explodedAt;
+            if (alive && myPos && !m.hit && elapsed < MISSILE_EXPLOSION_DURATION) {
+                const dist = Math.hypot(myPos.x - m.x, myPos.y - m.y);
+                if (dist < m.radius) {
+                    m.hit = true; // one hit per explosion, not per frame it lingers
+                    addDamagePopup(m.x, m.y, -10, 'red');
+                    send({ type: 'playerDamage' });
+                }
+            }
+            if (elapsed > MISSILE_EXPLOSION_DURATION) {
+                bossMissiles.splice(i, 1);
+            }
+        }
+    }
 }
 
 function updateLocalMovement(dt) {
@@ -792,7 +824,7 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, boss, damagePopups, graves, orbs, phase);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, boss, damagePopups, graves, orbs, phase);
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
     updateBossBar(encounter, boss, phase, inGame);
