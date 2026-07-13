@@ -84,29 +84,36 @@ export function rainAttack(bossBullets, bulletVelocity = 2.2, drops = 3) {
     }
 }
 
-// A volley of missiles fired offscreen that land in a line, one after
-// another, each telegraphing its landing spot before it impacts. Unlike the
-// other attacks these aren't moving projectiles — they're timed hazards, so
-// the caller (updateBossMissiles in client.js) drives them by wall-clock time
-// rather than per-frame dx/dy. The volley grows by one missile for every 15%
-// of the boss's HP already lost, so the bombardment escalates as the fight
-// goes on.
+// One or more volleys of missiles fired offscreen that each land in a line,
+// one after another, each telegraphing its landing spot before it impacts.
+// Unlike the other attacks these aren't moving projectiles — they're timed
+// hazards, so the caller (client.js) drives them by wall-clock time rather
+// than per-frame dx/dy. The caller resolves missileCount/lineCount from its
+// own escalation state (see bombardmentMissileBonus/LineBonus in client.js) —
+// this function just fires what it's told to.
 export const MISSILE_BLAST_RADIUS = 45; // px, final ring size — also the telegraph's footprint
 export const MISSILE_EXPLOSION_DURATION = 300; // ms the ring stays out (and stays a hitbox) after impact
+export const MISSILE_DAMAGE = 35; // matches the server's MISSILE_DAMAGE — used for the local damage popup only
 
-export function bombardmentAttack(boss, missiles, now, hpFraction, arena = { xMin: 80, xMax: 720, yMin: 380, yMax: 560 }) {
-    const missileCount = 1 + Math.floor((1 - hpFraction) / 0.15);
+const LAUNCH_TO_IMPACT = 900; // ms a missile is airborne/offscreen before landing
+const STAGGER = 220; // ms between each missile's impact within its line
+
+function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+}
+
+// A single line: missiles centered on a random point, spaced out along a
+// random angle (not always horizontal) and clamped to stay in-bounds.
+function fireLine(missiles, now, missileCount, arena) {
     const spacing = 70; // px between impact points along the line
-    const lineWidth = (missileCount - 1) * spacing;
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    const startX = arena.xMin + Math.random() * Math.max(1, (arena.xMax - arena.xMin) - lineWidth);
-    const y = arena.yMin + Math.random() * (arena.yMax - arena.yMin);
-
-    const LAUNCH_TO_IMPACT = 900; // ms a missile is airborne/offscreen before landing
-    const STAGGER = 220; // ms between each missile's impact within the volley
+    const angle = (Math.random() - 0.5) * Math.PI * 0.8; // roughly ±72° off horizontal
+    const cx = arena.xMin + Math.random() * (arena.xMax - arena.xMin);
+    const cy = arena.yMin + Math.random() * (arena.yMax - arena.yMin);
 
     for (let i = 0; i < missileCount; i++) {
-        const x = dir === 1 ? startX + i * spacing : startX + lineWidth - i * spacing;
+        const offset = (i - (missileCount - 1) / 2) * spacing;
+        const x = clamp(cx + Math.cos(angle) * offset, arena.xMin, arena.xMax);
+        const y = clamp(cy + Math.sin(angle) * offset, arena.yMin, arena.yMax);
         missiles.push({
             id: bulletIdCounter++,
             x,
@@ -118,5 +125,11 @@ export function bombardmentAttack(boss, missiles, now, hpFraction, arena = { xMi
             explodedAt: null,
             hit: false
         });
+    }
+}
+
+export function bombardmentAttack(missiles, now, missileCount, lineCount, arena = { xMin: 80, xMax: 720, yMin: 380, yMax: 560 }) {
+    for (let line = 0; line < lineCount; line++) {
+        fireLine(missiles, now, missileCount, arena);
     }
 }

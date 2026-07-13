@@ -3,7 +3,7 @@ import { updateHUD } from './hud.js';
 import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor } from './bossbar.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
-import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION } from './attacks.js';
+import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE } from './attacks.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -81,6 +81,15 @@ let bulletIdCounter = 0;
 let lastShot = 0;
 let lastBossAttack = 0;
 let bossAngleOffset = 0;
+
+// Bombardment's "low health" escalation (extra missiles per line / extra
+// simultaneous lines) is tracked as a ratchet — the highest level earned so
+// far — rather than a pure function of the current hp/maxHp fraction. Phase
+// 3 (enrage) refills the boss's HP into a smaller pool, and we want the
+// bonuses already earned in phase 1 to persist through that refill and keep
+// climbing from there, not reset back down to "full health" difficulty.
+let bombardmentMissileBonus = 0;
+let bombardmentLineBonus = 0;
 
 const movementKeys = {}; // Store current state of movement keys
 
@@ -363,6 +372,14 @@ function connect() {
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
             if (phase === 4 && (data.phase || 1) === 1) myPos = null;
+            // Any transition back to phase 1 means the encounter was reset
+            // (mid-fight restart, post-victory restart, or an automatic team
+            // wipe) — bombardment's earned difficulty bonuses shouldn't carry
+            // over into a fresh fight.
+            if (phase !== 1 && (data.phase || 1) === 1) {
+                bombardmentMissileBonus = 0;
+                bombardmentLineBonus = 0;
+            }
             phase = data.phase || 1;
             orbs = data.orbs || [];
             document.getElementById('victory-banner').style.display = phase === 4 ? 'block' : 'none';
@@ -681,9 +698,14 @@ function updateLocalCombat(now, myPos, alive) {
             case 'rain':
                 rainAttack(bossBullets, encounter.bulletSpeed, encounter.drops);
                 break;
-            case 'bombardment':
-                bombardmentAttack(boss, bossMissiles, now, boss.hp / (boss.maxHp || 1));
+            case 'bombardment': {
+                const hpFraction = boss.hp / (boss.maxHp || 1);
+                // Ratchet upward only — see the bonus vars' declaration for why.
+                bombardmentMissileBonus = Math.max(bombardmentMissileBonus, Math.floor((1 - hpFraction) / 0.15));
+                bombardmentLineBonus = Math.max(bombardmentLineBonus, Math.floor((1 - hpFraction) / 0.10));
+                bombardmentAttack(bossMissiles, now, 1 + bombardmentMissileBonus, 1 + bombardmentLineBonus);
                 break;
+            }
             default:
                 circularAttack(boss, bossBullets, bossAngleOffset, encounter.numberOfAngles, encounter.bulletSpeed);
                 bossAngleOffset += 0.1;
@@ -761,8 +783,8 @@ function updateLocalCombat(now, myPos, alive) {
                 const dist = Math.hypot(myPos.x - m.x, myPos.y - m.y);
                 if (dist < m.radius) {
                     m.hit = true; // one hit per explosion, not per frame it lingers
-                    addDamagePopup(m.x, m.y, -10, 'red');
-                    send({ type: 'playerDamage' });
+                    addDamagePopup(m.x, m.y, -MISSILE_DAMAGE, 'red');
+                    send({ type: 'playerDamage', source: 'missile' });
                 }
             }
             if (elapsed > MISSILE_EXPLOSION_DURATION) {

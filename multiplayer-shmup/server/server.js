@@ -42,6 +42,7 @@ const TICK_RATE = 15;
 const PLAYER_SPEED_PER_SEC = 150; // matches the client's prediction speed
 const PLAYER_BULLET_SPEED = 5; // matches the client's bullet speed, used to clamp relayed aim vectors
 const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report arbitrary damage
+const MISSILE_DAMAGE = 35; // bombardment explosions hit harder than a regular boss bullet
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
 const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
 const CHAT_MAX_LENGTH = 200;
@@ -126,7 +127,11 @@ const ENCOUNTERS = {
     // (see bombardmentAttack in attacks.js), so this stays a slower cadence
     // than the other patterns' per-bullet rate.
     attackRate: 1400, bigRedChance: 0,
-    chaseMaxHp: 600, chaseSpeed: 85, aimedShotInterval: 1100, aimedBulletSpeed: 3.4
+    // No aimedShotInterval: bombardment's own escalating missile volleys
+    // already carry the phase-3 enrage, so the generic single targeted shot
+    // every other encounter gets is redundant here (see the phase-3 block in
+    // gameLoop, which skips firing it when this is falsy).
+    chaseMaxHp: 600, chaseSpeed: 85
   }
 };
 
@@ -490,7 +495,11 @@ wss.on('connection', (ws) => {
         if (now - player.lastDamageReport < DAMAGE_REPORT_MIN_INTERVAL) return;
         player.lastDamageReport = now;
 
-        player.health -= BULLET_DAMAGE;
+        // The client only reports *that* it was hit and by what — the amount
+        // is still fixed server-side per source so a client can't self-report
+        // arbitrary damage.
+        const damage = data.source === 'missile' ? MISSILE_DAMAGE : BULLET_DAMAGE;
+        player.health -= damage;
         if (player.health <= 0 && !player.dead) {
           player.health = 0;
           player.dead = true;
@@ -685,7 +694,9 @@ function gameLoop() {
         lobby.boss.x = Math.max(CHASE_BOUNDS.xMin, Math.min(CHASE_BOUNDS.xMax, lobby.boss.x));
         lobby.boss.y = Math.max(CHASE_BOUNDS.yMin, Math.min(CHASE_BOUNDS.yMax, lobby.boss.y));
 
-        if (now - chase.lastAimedShot > lobby.encounter.aimedShotInterval) {
+        // Some encounters (bombardment) opt out of the generic targeted shot
+        // entirely — aimedShotInterval is absent/falsy for those.
+        if (lobby.encounter.aimedShotInterval && now - chase.lastAimedShot > lobby.encounter.aimedShotInterval) {
           chase.lastAimedShot = now;
           const targets = Object.values(lobby.players)
             .filter(p => !p.dead)

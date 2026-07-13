@@ -35,33 +35,92 @@ function drawGravestone(x, y, color) {
     ctx.fillRect(x - w / 2, y + h / 2 - 3, w, 3);
 }
 
-// Bombardment hazards: a pulsing telegraph ring while the missile is still
-// airborne — the shadow inside it fills in as impact approaches, so the
-// warning is most solid right when it matters — then a bright ring that
-// expands and fades once it lands.
-function drawMissiles(missiles) {
+// A small missile sprite: nose cone + flame, rotated to face its direction
+// of travel (angle is a standard atan2(dy, dx) — the shape is drawn nose-up
+// by default, so it needs a +90° correction to line up with that convention).
+function drawRocket(x, y, angle) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle + Math.PI / 2);
+    ctx.fillStyle = '#ccc';
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(4, 4);
+    ctx.lineTo(-4, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ff8844';
+    ctx.beginPath();
+    ctx.moveTo(-3, 4);
+    ctx.lineTo(0, 13);
+    ctx.lineTo(3, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+const ROCKET_FLIGHT_MS = 300; // ms spent visibly ascending from the boss / descending to the ground
+const OFFSCREEN_Y = -40; // where the rocket "disappears" to between ascent and descent
+
+let shakeEndTime = 0;
+const SHAKE_DURATION = 200; // ms
+const SHAKE_MAGNITUDE = 6; // px
+
+// Bombardment hazards: the boss visibly fires a rocket that arcs offscreen,
+// then — once it's out of view — a pulsing telegraph ring appears on the
+// ground where it'll land (filling in as impact nears, so the warning is
+// most solid right when it matters), then the rocket reappears falling back
+// down and impacts in a bright ring that expands and fades.
+function drawMissiles(missiles, boss) {
     const now = performance.now();
     for (const m of missiles) {
         if (!m.exploded) {
-            const total = m.impactTime - m.spawnTime;
-            const remainingFrac = total > 0 ? Math.max(0, Math.min(1, (m.impactTime - now) / total)) : 0;
-            const dangerFrac = 1 - remainingFrac; // 0 at launch, 1 right at impact
+            const sinceSpawn = now - m.spawnTime;
+            const untilImpact = m.impactTime - now;
 
-            ctx.globalAlpha = (0.35 + 0.25 * dangerFrac) + 0.2 * Math.sin(now / 90);
-            ctx.strokeStyle = '#ff4444';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([6, 4]);
-            ctx.beginPath();
-            ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.setLineDash([]);
+            if (sinceSpawn < ROCKET_FLIGHT_MS) {
+                // Ascending from the boss, arcing toward the target's x so it
+                // reads as "fired at" the landing spot rather than straight up.
+                const t = Math.max(0, Math.min(1, sinceSpawn / ROCKET_FLIGHT_MS));
+                const rx = boss.x + (m.x - boss.x) * t;
+                const ry = boss.y + (OFFSCREEN_Y - boss.y) * t;
+                drawRocket(rx, ry, Math.atan2(OFFSCREEN_Y - boss.y, m.x - boss.x));
+            } else if (untilImpact >= 0 && untilImpact < ROCKET_FLIGHT_MS) {
+                // Falling back down onto its mark.
+                const t = 1 - Math.max(0, Math.min(1, untilImpact / ROCKET_FLIGHT_MS));
+                const ry = OFFSCREEN_Y + (m.y - OFFSCREEN_Y) * t;
+                drawRocket(m.x, ry, Math.PI / 2);
+            }
 
-            ctx.globalAlpha = 0.25 + 0.45 * dangerFrac;
-            ctx.fillStyle = '#ff8844';
-            ctx.beginPath();
-            ctx.arc(m.x, m.y, m.radius * dangerFrac, 0, Math.PI * 2);
-            ctx.fill();
+            // The ground telegraph only appears once the rocket has actually
+            // left the screen — showing it while the rocket is still visibly
+            // ascending would spoil/clutter the "it's now offscreen" beat.
+            if (sinceSpawn >= ROCKET_FLIGHT_MS) {
+                const total = m.impactTime - m.spawnTime;
+                const remainingFrac = total > 0 ? Math.max(0, Math.min(1, (m.impactTime - now) / total)) : 0;
+                const dangerFrac = 1 - remainingFrac; // 0 once offscreen, 1 right at impact
+
+                ctx.globalAlpha = (0.35 + 0.25 * dangerFrac) + 0.2 * Math.sin(now / 90);
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.globalAlpha = 0.25 + 0.45 * dangerFrac;
+                ctx.fillStyle = '#ff8844';
+                ctx.beginPath();
+                ctx.arc(m.x, m.y, m.radius * dangerFrac, 0, Math.PI * 2);
+                ctx.fill();
+            }
         } else {
+            if (!m.shaken) {
+                m.shaken = true;
+                shakeEndTime = now + SHAKE_DURATION;
+            }
+
             const p = Math.min(1, (now - m.explodedAt) / MISSILE_EXPLOSION_DURATION);
             ctx.globalAlpha = 1 - p;
             ctx.strokeStyle = '#ffaa33';
@@ -75,7 +134,16 @@ function drawMissiles(missiles) {
 }
 
 export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, boss, damagePopups, graves, orbs, phase) {
+    // Reset any transform left over from a previous shaking frame before
+    // clearing, so the clear always covers the full physical canvas.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const now = performance.now();
+    if (now < shakeEndTime) {
+        const remaining = (shakeEndTime - now) / SHAKE_DURATION;
+        ctx.translate((Math.random() - 0.5) * 2 * SHAKE_MAGNITUDE * remaining, (Math.random() - 0.5) * 2 * SHAKE_MAGNITUDE * remaining);
+    }
 
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
@@ -210,7 +278,7 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         ctx.fill();
     }
 
-    drawMissiles(bossMissiles);
+    drawMissiles(bossMissiles, boss);
 
     // Damage Popups
     for (let i = damagePopups.length - 1; i >= 0; i--) {
