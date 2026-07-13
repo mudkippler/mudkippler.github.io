@@ -297,19 +297,4 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         if (d.alpha <= 0) damagePopups.splice(i, 1);
     }
     ctx.globalAlpha = 1; // Reset alpha
-
-    // Draw self indicator (bottom center)
-    if (me) {
-        ctx.font = '16px impact';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillStyle = 'white';
-        ctx.fillText('You are', canvas.width / 2, canvas.height - 15);
-
-        // Draw a circle in your color
-        ctx.beginPath();
-        ctx.arc(canvas.width / 2 + 40, canvas.height - 25, 8, 0, Math.PI * 2);
-        ctx.fillStyle = me.color;
-        ctx.fill();
-    }
 }

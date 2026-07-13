@@ -2,6 +2,7 @@ import { draw } from './renderer.js';
 import { updateHUD } from './hud.js';
 import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor } from './bossbar.js';
+import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
 import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE } from './attacks.js';
 
@@ -283,6 +284,7 @@ function connect() {
             orbs = data.orbs || [];
             inGame = data.started;
             paused = data.paused || false;
+            setBossPortrait(encounter.id, bossPortraitState(phase, boss.hp, boss.maxHp));
 
             // Make the current URL shareable/refreshable
             history.replaceState(null, '', inviteLink(lobbyCode));
@@ -332,6 +334,7 @@ function connect() {
             bossMissiles = [];
             lastBossAttack = 0;
             bossAngleOffset = 0;
+            setBossPortrait(encounter.id, 'base');
             updateHostControls();
             return;
         }
@@ -384,6 +387,7 @@ function connect() {
                 bombardmentLineBonus = 0;
             }
             phase = data.phase || 1;
+            setBossPortrait(encounter.id, bossPortraitState(phase, boss.hp, boss.maxHp));
             orbs = data.orbs || [];
             document.getElementById('victory-banner').style.display = phase === 4 ? 'block' : 'none';
             document.getElementById('restart-btn').style.display = phase === 4 && isHost ? 'inline-block' : 'none';
@@ -458,6 +462,7 @@ function connect() {
             // Boss speech reads as a chat line, colored to match this
             // encounter's flair so it's still visually distinct from players.
             addChatMessage(getFlairColor(encounter.id), `${encounter.name}: ${data.text}`, true);
+            showBossLine(data.text, data.intensity || 0);
             return;
         }
     });
@@ -862,6 +867,7 @@ function gameLoop() {
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
     updateBossBar(encounter, boss, phase, inGame);
+    showBossDialogue(inGame);
     updateDiagnostics();
     requestAnimationFrame(gameLoop);
 }

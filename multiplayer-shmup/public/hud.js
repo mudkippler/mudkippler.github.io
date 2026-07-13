@@ -8,6 +8,7 @@ export function updateHUD(myId, players) {
     const hue = healthPercentage * 120; // 0 is red, 120 is green
     hud.innerHTML = `
         <div class="hud-row">
+            <span class="hud-color-dot" style="background: ${me.color};"></span>
             <span class="hud-label">HP</span>
             <div class="hud-bar-track">
                 <div class="hud-bar-fill" style="width: ${healthPercentage * 100}%; background: hsl(${hue}, 100%, 50%);"></div>

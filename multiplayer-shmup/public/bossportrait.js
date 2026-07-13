@@ -1,0 +1,58 @@
+// Boss portrait + dialogue bubble, shown to the left of the playfield.
+// Portrait art is optional: drop these into public/img and they're picked up
+// automatically (missing files just hide the portrait frame instead of
+// showing a broken image):
+//   img/<encounterId>.png            — phase 1, HP above 50%
+//   img/<encounterId>_injured.png    — phase 1, HP at or below 50%
+//   img/<encounterId>_enraged.png    — phase 3 (the enrage chase)
+//   img/<encounterId>_defeat.png     — phase 4 (boss down)
+
+const containerEl = document.getElementById('boss-dialogue');
+const portraitImg = document.getElementById('boss-portrait-img');
+const bubbleEl = document.getElementById('boss-dialogue-bubble');
+const textEl = document.getElementById('boss-dialogue-text');
+
+const STATE_SUFFIX = { base: '', injured: '_injured', enraged: '_enraged', defeat: '_defeat' };
+
+let currentEncounterId = null;
+let currentState = null;
+let hideTimer = null;
+
+portraitImg.onload = () => { portraitImg.style.display = 'block'; };
+portraitImg.onerror = () => { portraitImg.style.display = 'none'; };
+
+export function showBossDialogue(inGame) {
+    containerEl.style.display = inGame ? 'block' : 'none';
+}
+
+// Derives which portrait state to show from the boss's current phase/HP.
+export function bossPortraitState(phase, hp, maxHp) {
+    if (phase === 4) return 'defeat';
+    if (phase === 3) return 'enraged';
+    return hp / (maxHp || 1) <= 0.5 ? 'injured' : 'base';
+}
+
+// Swaps portrait art when the encounter or its state (base/injured/enraged/defeat) changes.
+export function setBossPortrait(encounterId, state) {
+    if (encounterId === currentEncounterId && state === currentState) return;
+    currentEncounterId = encounterId;
+    currentState = state;
+    portraitImg.style.display = 'none';
+    portraitImg.src = `img/${encounterId}${STATE_SUFFIX[state] || ''}.png`;
+}
+
+const DIALOGUE_DISPLAY_MS = 5000;
+
+// intensity ramps 0 (calm) through 6 (total meltdown) — see the .boss-line-N
+// styles in index.html for what each level actually looks like.
+export function showBossLine(text, intensity = 0) {
+    textEl.textContent = text;
+    textEl.className = `boss-line-${Math.max(0, Math.min(6, intensity))}`;
+    // Force a reflow so back-to-back lines at the same intensity restart
+    // their shake/flicker animation instead of continuing mid-cycle.
+    void textEl.offsetWidth;
+    bubbleEl.classList.add('visible');
+
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => bubbleEl.classList.remove('visible'), DIALOGUE_DISPLAY_MS);
+}

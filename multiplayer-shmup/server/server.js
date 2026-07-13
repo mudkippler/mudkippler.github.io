@@ -121,7 +121,7 @@ const ENCOUNTERS = {
   },
   bombardment: {
     id: 'bombardment', name: 'Bombardment', pattern: 'bombardment',
-    bossMaxHp: 2400, hasOrbPhase: false,
+    bossMaxHp: 5000, hasOrbPhase: false,
     // attackRate is the gap between volleys, not between missiles within one
     // — each volley is itself an extended sequence of telegraphed impacts
     // (see bombardmentAttack in attacks.js), so this stays a slower cadence
@@ -208,7 +208,8 @@ function createLobby(encounterId) {
     orbs: [], // {id, baseX, baseY, x, y, hp, maxHp, deadAt}
     chase: null, // {waypoint: {x,y}, lastAimedShot} — set on entering phase 3
     damageLog: {}, // id -> {name, color, dmg}
-    graves: [] // {x, y, color} markers left where players have died
+    graves: [], // {x, y, color} markers left where players have died
+    hpTaunts: new Set() // 'phase1-75'/'enrage-25'/etc — HP milestones already spoken this run
   };
   lobbies[code] = lobby;
   return lobby;
@@ -221,8 +222,144 @@ function lobbyBroadcast(lobby, message) {
   }
 }
 
-function bossSay(lobby, text) {
-  lobbyBroadcast(lobby, serialize({ type: 'bossSay', text }));
+function bossSay(lobby, text, intensity = 0) {
+  lobbyBroadcast(lobby, serialize({ type: 'bossSay', text, intensity }));
+}
+
+// Per-encounter dialogue at HP milestones, reused for both the main fight
+// (phase 1) and the phase-3 enrage chase — enrage gets more lines per
+// threshold and higher intensity (see HP_TAUNT_INTENSITY) so the boss visibly
+// unravels the closer it gets to death. `phase1[100]`/`enrage[100]` fire once
+// on entering that phase; 75/50/25 fire the first time HP crosses under them.
+const BOSS_LINES = {
+  twin: {
+    phase1: {
+      100: ["Two blades, one purpose. Let's dance."],
+      75: ["You're better than I expected."],
+      50: ["Impressive. Truly."],
+      25: ["...you're actually hurting me."]
+    },
+    enrage: {
+      75: ["I said ENOUGH!", "Both blades. No mercy now."],
+      50: ["I WILL NOT FALL TO THIS!", "Stand still and DIE!"],
+      25: ["This... isn't... POSSIBLE—", "I REFUSE! I REFUSE!!", "*the blades scream with him*"]
+    }
+  },
+  storm: {
+    phase1: {
+      100: ['Let the storm begin.'],
+      75: ['Just a drizzle so far.'],
+      50: ["Now you'll feel the real storm."],
+      25: ['The sky itself trembles...']
+    },
+    enrage: {
+      75: ['THUNDER ANSWERS ME!', 'You woke the storm, fool!'],
+      50: ['I AM THE STORM!', 'NOWHERE TO HIDE NOW!'],
+      25: ['t-the storm... is breaking apart—', 'NO! NO!! NOOOO!', '*lightning crackles wildly*']
+    }
+  },
+  blitz: {
+    phase1: {
+      100: ['Fast. Furious. Fatal. Try to keep up.'],
+      75: ['Too slow!'],
+      50: ['Getting warmer, aren’t I?'],
+      25: ['Alright — no more playing around.']
+    },
+    enrage: {
+      75: ['FULL THROTTLE!', "Burn faster than you can blink!"],
+      50: ["I'M UNSTOPPABLE!!", 'CAN’T. CATCH. ME.'],
+      25: ["m-my flame's... flickering—", "I WON'T BURN OUT HERE!", '*the fire roars unevenly*']
+    }
+  },
+  helix: {
+    phase1: {
+      100: ['Round and round you’ll go.'],
+      75: ['Dizzy yet?'],
+      50: ['The spiral tightens.'],
+      25: ["You're unraveling me..."]
+    },
+    enrage: {
+      75: ['THE PATTERN BREAKS FREE!', 'Spin with me — FOREVER!'],
+      50: ['I AM THE VORTEX!', 'EVERYTHING FALLS INWARD!'],
+      25: ["the spiral's... collapsing—", 'HOLD TOGETHER, HOLD—', '*reality warps and stutters*']
+    }
+  },
+  tide: {
+    phase1: {
+      100: ['The tide answers to no one.'],
+      75: ['A ripple, nothing more.'],
+      50: ['The waters rise against you.'],
+      25: ["You've breached the seawall..."]
+    },
+    enrage: {
+      75: ['THE FLOOD COMES FOR YOU!', 'Drown in my fury!'],
+      50: ['I AM THE DEEP ITSELF!', 'THE TIDE NEVER STOPS!'],
+      25: ['the waters... are receding—', 'NO! STAY! STAY WITH ME!', '*the tide howls and crashes*']
+    }
+  },
+  rain: {
+    phase1: {
+      100: ['Hope you brought an umbrella.'],
+      75: ['Just the first drops.'],
+      50: ['It burns more with every drop, doesn’t it?'],
+      25: ['The clouds are thinning...']
+    },
+    enrage: {
+      75: ['A DOWNPOUR OF PAIN!', 'Let it ALL corrode!'],
+      50: ['I AM THE STORMCLOUD!', 'NOTHING SURVIVES THE RAIN!'],
+      25: ['the clouds... are dissolving—', "I WON'T DRY UP! I WON'T!", '*the acid hisses erratically*']
+    }
+  },
+  bombardment: {
+    phase1: {
+      100: ['Brace yourselves. Impact incoming.'],
+      75: ['First volley — barely a scratch.'],
+      50: ['Feel the barrage intensify.'],
+      25: ["You're punching through my lines!"]
+    },
+    enrage: {
+      75: ['FULL BOMBARDMENT — NO SURVIVORS!', "Everything I've got. NOW!"],
+      50: ["I WON'T STOP FIRING!!", 'SATURATE THE FIELD!'],
+      25: ["m-my arsenal's... failing—", 'ONE MORE VOLLEY! JUST ONE MORE!', '*explosions stutter and misfire*']
+    }
+  }
+};
+const DEFAULT_BOSS_LINES = {
+  phase1: { 100: ["Let's begin."], 75: ['Not bad.'], 50: ["You're doing well."], 25: ["I'm actually struggling..."] },
+  enrage: {
+    75: ['ENOUGH OF THIS!', 'No more holding back!'],
+    50: ["I WON'T LOSE HERE!", 'MOVE, MOVE, MOVE—'],
+    25: ["n-no... this can't—", 'I REFUSE TO FALL!!', '*a scream of static and rage*']
+  }
+};
+
+// 1 (barely rattled) through 6 (total meltdown) — drives the client's
+// escalating dialogue-box styling (font/color/size/shake).
+const HP_TAUNT_INTENSITY = { 'phase1-75': 1, 'phase1-50': 2, 'phase1-25': 3, 'enrage-75': 4, 'enrage-50': 5, 'enrage-25': 6 };
+
+// Fires the encounter's line for the phase's 100% milestone (call once, right
+// as phase 1 or the enrage chase begins).
+function bossSayPhaseStart(lobby, phaseKey) {
+  const pool = (BOSS_LINES[lobby.encounter.id] || DEFAULT_BOSS_LINES)[phaseKey];
+  const lines = pool && pool[100];
+  if (lines && lines.length) bossSay(lobby, lines[Math.floor(Math.random() * lines.length)], phaseKey === 'enrage' ? 3 : 0);
+}
+
+// Checks the boss's current HP against the 75/50/25% milestones for whichever
+// phase it's currently in and fires (once each) the first time HP crosses
+// under one. Call after any change to lobby.boss.hp during phase 1 or 3.
+function checkHpTaunts(lobby) {
+  const phaseKey = lobby.phase === 3 ? 'enrage' : lobby.phase === 1 ? 'phase1' : null;
+  if (!phaseKey) return;
+  const pct = (lobby.boss.hp / (lobby.boss.maxHp || 1)) * 100;
+  const pool = (BOSS_LINES[lobby.encounter.id] || DEFAULT_BOSS_LINES)[phaseKey];
+  for (const threshold of [75, 50, 25]) {
+    const key = `${phaseKey}-${threshold}`;
+    if (pct > threshold || lobby.hpTaunts.has(key)) continue;
+    lobby.hpTaunts.add(key);
+    const lines = pool && pool[threshold];
+    if (lines && lines.length) bossSay(lobby, lines[Math.floor(Math.random() * lines.length)], HP_TAUNT_INTENSITY[key]);
+  }
 }
 
 function publicOrbs(lobby) {
@@ -252,6 +389,7 @@ function resetEncounter(lobby) {
   lobby.phase = 1;
   lobby.orbs = [];
   lobby.chase = null;
+  lobby.hpTaunts = new Set();
   for (const id in lobby.players) {
     const p = lobby.players[id];
     const spawn = spawnPosition();
@@ -283,7 +421,7 @@ function startChasePhase(lobby, taunt) {
   lobby.boss.maxHp = lobby.encounter.chaseMaxHp;
   lobby.boss.hp = lobby.encounter.chaseMaxHp;
   lobby.chase = { waypoint: pickChaseWaypoint(), lastAimedShot: Date.now() };
-  bossSay(lobby, taunt);
+  bossSay(lobby, taunt, 3);
 }
 
 function sanitizeName(raw) {
@@ -405,6 +543,7 @@ wss.on('connection', (ws) => {
         lobby.started = true;
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
+        bossSayPhaseStart(lobby, 'phase1');
       } else if (data.type === 'togglePause') {
         if (ws.id !== lobby.hostId || !lobby.started) return;
         lobby.paused = !lobby.paused;
@@ -459,6 +598,7 @@ wss.on('connection', (ws) => {
 
         lobby.boss.hp = Math.max(0, lobby.boss.hp - BULLET_DAMAGE);
         lobby.damageLog[ws.id].dmg += BULLET_DAMAGE;
+        checkHpTaunts(lobby);
 
         if (lobby.boss.hp <= 0) {
           if (lobby.phase === 3) {
