@@ -475,7 +475,7 @@
                 <input id="player-name" type="text" maxlength="16" placeholder="anon" />
             </div>
 
-            <div class="menu-section">
+            <div class="menu-section" id="create-lobby-section">
                 <h3>Create a lobby</h3>
                 <label for="encounter-select">Encounter</label>
                 <select id="encounter-select">
@@ -490,10 +490,12 @@
                 <button id="create-btn">Create Lobby</button>
             </div>
 
-            <div class="menu-section">
-                <h3>Join a lobby</h3>
-                <label for="join-code">Lobby code</label>
-                <input id="join-code" type="text" maxlength="5" placeholder="e.g. XK4P2" style="text-transform: uppercase;" />
+            <div class="menu-section" id="join-lobby-section">
+                <h3 id="join-lobby-heading">Join a lobby</h3>
+                <div id="join-code-field">
+                    <label for="join-code">Lobby code</label>
+                    <input id="join-code" type="text" maxlength="5" placeholder="e.g. XK4P2" style="text-transform: uppercase;" />
+                </div>
                 <button id="join-btn" class="secondary">Join Lobby</button>
             </div>
 

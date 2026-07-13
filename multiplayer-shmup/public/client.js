@@ -175,8 +175,7 @@ document.getElementById('create-btn').addEventListener('click', () => {
     connectAndSend({ type: 'createLobby', name: myName, encounter: encounterId });
 });
 
-document.getElementById('join-btn').addEventListener('click', () => {
-    const code = joinCodeInput.value.trim().toUpperCase();
+function attemptJoinLobby(code) {
     if (!code) {
         menuErrorEl.textContent = 'Enter a lobby code.';
         return;
@@ -184,6 +183,10 @@ document.getElementById('join-btn').addEventListener('click', () => {
     myName = playerNameInput.value.trim() || 'anon';
     menuErrorEl.textContent = '';
     connectAndSend({ type: 'joinLobby', code, name: myName });
+}
+
+document.getElementById('join-btn').addEventListener('click', () => {
+    attemptJoinLobby(joinCodeInput.value.trim().toUpperCase());
 });
 
 document.getElementById('start-btn').addEventListener('click', () => {
@@ -460,11 +463,20 @@ function connect() {
     });
 }
 
-// On load: show the menu, prefilling the lobby code from a shared ?lobby= link
+// On load: a shared ?lobby= link skips straight to "enter your name" for
+// that lobby — no need to see the create-lobby options or re-type a code
+// that's already known — and joins as soon as a name is submitted.
 const urlLobbyCode = new URLSearchParams(location.search).get('lobby');
 if (urlLobbyCode) {
-    joinCodeInput.value = urlLobbyCode.toUpperCase();
+    const code = urlLobbyCode.toUpperCase();
+    joinCodeInput.value = code;
+    document.getElementById('create-lobby-section').style.display = 'none';
+    document.getElementById('join-code-field').style.display = 'none';
+    document.getElementById('join-lobby-heading').textContent = `Join lobby ${code}`;
     playerNameInput.focus();
+    playerNameInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') attemptJoinLobby(code);
+    });
 }
 showMenu();
 
