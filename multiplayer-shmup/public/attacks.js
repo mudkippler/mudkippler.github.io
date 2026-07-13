@@ -101,6 +101,24 @@ export function stormRainAttack(bossBullets, bulletVelocity = 2, drops = 4, wind
     }
 }
 
+// Storm's umbrella: a fixed structure on the field (not a per-player ability)
+// that everyone can see and physically stand under. It's a solid obstacle —
+// neither the rain nor the players' own shots can pass through the band it
+// occupies — so it's real cover, not just a damage-negating buff, and using
+// it costs you a firing lane on the boss while you're under it. It vanishes
+// entirely during a strong gust (see wind.umbrella in the 'state' broadcast)
+// and the rain itself thins to a drizzle for that stretch so being caught
+// without it isn't unfair.
+export const STORM_UMBRELLA_X = 400;
+export const STORM_UMBRELLA_Y = 260;
+export const STORM_UMBRELLA_HALF_WIDTH = 55; // px, canopy half-span
+export const STORM_UMBRELLA_BAND = 14; // px, half-height of the blocking band
+
+export function isBlockedByStormUmbrella(x, y) {
+    return Math.abs(x - STORM_UMBRELLA_X) < STORM_UMBRELLA_HALF_WIDTH
+        && Math.abs(y - STORM_UMBRELLA_Y) < STORM_UMBRELLA_BAND;
+}
+
 // Lightning: a vertical warning bar telegraphs where a bolt will land, then
 // it becomes a brief full-height strike hitbox. Like the bombardment
 // missiles these are timed hazards the caller (client.js) drives by

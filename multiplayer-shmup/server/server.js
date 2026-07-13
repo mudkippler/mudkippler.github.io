@@ -45,6 +45,7 @@ const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report 
 const MISSILE_DAMAGE = 35; // bombardment explosions hit harder than a regular boss bullet
 const LIGHTNING_DAMAGE = 25; // storm's lightning strikes, between a regular bullet and a missile
 const WIND_MAX_STRENGTH = 120; // px/sec, storm's strongest gusts (see the wind block in gameLoop)
+const UMBRELLA_BLOWN_GUST = 0.55; // gust fraction (0-1) above which the umbrella is blown away
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
 const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
 const CHAT_MAX_LENGTH = 200;
@@ -92,11 +93,14 @@ const ENCOUNTERS = {
   // attacks.js) instead of the default ring, plus wind that continuously
   // pushes players around (see the wind block in gameLoop) — the rain's
   // sideways drift follows the same wind vector so the whole sky visibly
-  // leans with the gusts.
+  // leans with the gusts. `drops` is the sheltered-phase density; the client
+  // thins it out on its own during a blown-away gust (see the 'storm' case
+  // in updateLocalCombat) since raising an umbrella is what makes this safe
+  // to run this dense in the first place.
   storm: {
     id: 'storm', name: 'Bullet Storm', pattern: 'storm',
     bossMaxHp: 3500, hasOrbPhase: false,
-    attackRate: 55, drops: 5, bulletSpeed: 2.4, bigRedChance: 0,
+    attackRate: 45, drops: 9, bulletSpeed: 2.6, bigRedChance: 0,
     chaseMaxHp: 600, chaseSpeed: 90, aimedShotInterval: 1000, aimedBulletSpeed: 3.6
   },
   blitz: {
@@ -784,7 +788,14 @@ function gameLoop() {
         const windAngle = Math.sin(wt * 0.15) * 1.0 + Math.sin(wt * 0.37) * 0.4;
         const gust = Math.pow(0.5 + 0.5 * Math.sin(wt * 0.5), 6); // occasional strong pulses, mostly calm between
         const windStrength = 30 + gust * (WIND_MAX_STRENGTH - 30);
-        lobby.wind = { x: Math.cos(windAngle) * windStrength, y: Math.sin(windAngle) * windStrength * 0.15 };
+        // The same gust that's strong enough to shove players around is what
+        // tears the umbrella out of their hands — see UMBRELLA_BLOWN_GUST in
+        // the client's rain density calc for the other half of this trade.
+        lobby.wind = {
+          x: Math.cos(windAngle) * windStrength,
+          y: Math.sin(windAngle) * windStrength * 0.15,
+          umbrella: gust <= UMBRELLA_BLOWN_GUST
+        };
       } else {
         lobby.wind = null;
       }
@@ -909,7 +920,7 @@ function gameLoop() {
       paused: lobby.paused,
       // Omitted entirely outside storm's wind-active phases to save bytes on
       // every other encounter/lobby's per-tick broadcast.
-      ...(lobby.wind ? { wind: { x: t(lobby.wind.x), y: t(lobby.wind.y) } } : {})
+      ...(lobby.wind ? { wind: { x: t(lobby.wind.x), y: t(lobby.wind.y), umbrella: lobby.wind.umbrella } } : {})
     }));
   }
 }

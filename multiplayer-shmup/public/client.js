@@ -4,7 +4,7 @@ import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js';
 import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
-import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, stormRainAttack, lightningAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE } from './attacks.js';
+import { circularAttack, bigRedBallAttack, spiralAttack, waveAttack, rainAttack, stormRainAttack, lightningAttack, bombardmentAttack, MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE, isBlockedByStormUmbrella } from './attacks.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -386,7 +386,7 @@ function connect() {
             }
 
             boss = { ...boss, ...data.boss };
-            wind = data.wind || { x: 0, y: 0 };
+            wind = data.wind || { x: 0, y: 0, umbrella: true };
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
             if (phase === 4 && (data.phase || 1) === 1) myPos = null;
@@ -670,6 +670,13 @@ function updateAllyBullets() {
     }
 }
 
+// Whether storm's umbrella is currently standing on the field — it vanishes
+// during a strong gust (wind.umbrella === false, see the gust calc in
+// server.js), which the rain density below also reacts to.
+function stormUmbrellaActive() {
+    return encounter.pattern === 'storm' && (phase === 1 || phase === 3) && wind.umbrella !== false;
+}
+
 function updateLocalCombat(now, myPos, alive) {
     // Fire local bullets (dead players can't shoot, but keep spectating)
     if (alive && myPos && (movementKeys[' '] || movementKeys['Space']) && now - lastShot > PLAYER_SHOT_COOLDOWN) {
@@ -728,9 +735,16 @@ function updateLocalCombat(now, myPos, alive) {
             case 'rain':
                 rainAttack(bossBullets, encounter.bulletSpeed, encounter.drops);
                 break;
-            case 'storm':
-                stormRainAttack(bossBullets, encounter.bulletSpeed, encounter.drops, wind);
+            case 'storm': {
+                // Dense rain while the umbrella can shelter you from it;
+                // fades to a drizzle while a gust has it blown away, so
+                // being briefly exposed doesn't feel unfair.
+                const sheltered = wind.umbrella !== false;
+                const drops = sheltered ? encounter.drops : Math.max(2, Math.round(encounter.drops / 3));
+                const speed = sheltered ? encounter.bulletSpeed : encounter.bulletSpeed * 0.6;
+                stormRainAttack(bossBullets, speed, drops, wind);
                 break;
+            }
             case 'bombardment': {
                 const hpFraction = boss.hp / (boss.maxHp || 1);
                 // Ratchet upward only — see the bonus vars' declaration for why.
@@ -758,10 +772,16 @@ function updateLocalCombat(now, myPos, alive) {
     }
 
     // Update + collide player bullets against the current phase's target(s)
+    const umbrellaOnField = stormUmbrellaActive();
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
         b.x += b.dx;
         b.y += b.dy;
+
+        if (umbrellaOnField && isBlockedByStormUmbrella(b.x, b.y)) {
+            bullets.splice(i, 1); // your own shot can't pass through it either
+            continue;
+        }
 
         let hit = false;
         if (phase === 1 || phase === 3) {
@@ -793,6 +813,11 @@ function updateLocalCombat(now, myPos, alive) {
         const b = bossBullets[i];
         b.x += b.dx;
         b.y += b.dy;
+
+        if (umbrellaOnField && isBlockedByStormUmbrella(b.x, b.y)) {
+            bossBullets.splice(i, 1); // stopped cold by the canopy
+            continue;
+        }
 
         if (alive && myPos) {
             const dist = Math.hypot(b.x - myPos.x, b.y - myPos.y);
@@ -916,7 +941,7 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase, stormUmbrellaActive());
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
     updateBossBar(encounter, boss, phase, inGame);

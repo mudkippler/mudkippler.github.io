@@ -1,4 +1,4 @@
-import { MISSILE_EXPLOSION_DURATION, LIGHTNING_WARNING_MS, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH } from './attacks.js';
+import { MISSILE_EXPLOSION_DURATION, LIGHTNING_WARNING_MS, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, STORM_UMBRELLA_X, STORM_UMBRELLA_Y, STORM_UMBRELLA_HALF_WIDTH } from './attacks.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -61,6 +61,60 @@ function drawRocket(x, y, angle) {
 
 const ROCKET_FLIGHT_MS = 300; // ms spent visibly ascending from the boss / descending to the ground
 const OFFSCREEN_Y = -40; // where the rocket "disappears" to between ascent and descent
+
+// Storm's umbrella: a fixed structure on the field, not a per-player ability
+// — everyone sees the same one, standing at the same spot. Fades in/out
+// smoothly across a gust's arrival/departure rather than popping, and the
+// pale band beneath it traces out the actual "safe to stand here" footprint
+// (matches isBlockedByStormUmbrella's hitbox in attacks.js) so the shelter
+// zone reads clearly at a glance instead of players having to guess its edges.
+let umbrellaAlpha = 0;
+
+function drawStormUmbrella(active, dt) {
+    umbrellaAlpha += ((active ? 1 : 0) - umbrellaAlpha) * Math.min(1, dt * 6);
+    if (umbrellaAlpha < 0.02) return;
+
+    ctx.save();
+    ctx.globalAlpha = umbrellaAlpha;
+
+    // Shelter footprint on the ground below the canopy.
+    ctx.fillStyle = 'rgba(120, 180, 255, 0.07)';
+    ctx.fillRect(
+        STORM_UMBRELLA_X - STORM_UMBRELLA_HALF_WIDTH, STORM_UMBRELLA_Y,
+        STORM_UMBRELLA_HALF_WIDTH * 2, 600 - STORM_UMBRELLA_Y
+    );
+
+    ctx.translate(STORM_UMBRELLA_X, STORM_UMBRELLA_Y);
+
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, 40);
+    ctx.stroke();
+
+    ctx.fillStyle = '#4da6ff';
+    ctx.strokeStyle = '#0a0a0d';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, STORM_UMBRELLA_HALF_WIDTH, Math.PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Ribs so it reads as a canopy, not a blob.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = 1;
+    for (const frac of [-0.85, -0.4, 0, 0.4, 0.85]) {
+        ctx.beginPath();
+        ctx.moveTo(frac * STORM_UMBRELLA_HALF_WIDTH, 0);
+        ctx.lineTo(frac * STORM_UMBRELLA_HALF_WIDTH * 0.25, -STORM_UMBRELLA_HALF_WIDTH * 0.9);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+}
 
 let shakeEndTime = 0;
 const SHAKE_DURATION = 200; // ms
@@ -189,17 +243,25 @@ function drawLightning(bolts) {
     ctx.globalAlpha = 1;
 }
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase) {
+let lastDrawTime = performance.now();
+
+export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phase, stormUmbrellaActive) {
     // Reset any transform left over from a previous shaking frame before
     // clearing, so the clear always covers the full physical canvas.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const now = performance.now();
+    const dt = Math.min((now - lastDrawTime) / 1000, 0.1);
+    lastDrawTime = now;
+
     if (now < shakeEndTime) {
         const remaining = (shakeEndTime - now) / SHAKE_DURATION;
         ctx.translate((Math.random() - 0.5) * 2 * SHAKE_MAGNITUDE * remaining, (Math.random() - 0.5) * 2 * SHAKE_MAGNITUDE * remaining);
     }
+
+    // Storm's umbrella, drawn early so players/bullets render on top of it.
+    drawStormUmbrella(!!stormUmbrellaActive, dt);
 
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
