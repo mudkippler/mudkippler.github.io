@@ -23,8 +23,11 @@ function finish() {
 
 function makeClient(name) {
   const ws = new WebSocket(URL);
-  const client = { ws, name, messages: [], id: null };
+  // bytesReceived mirrors what the in-game diagnostics panel measures on the
+  // receive side — the bandwidth test samples it over a window.
+  const client = { ws, name, messages: [], id: null, bytesReceived: 0 };
   ws.on('message', (buf) => {
+    client.bytesReceived += buf.length;
     client.messages.push(msgpack.deserialize(new Uint8Array(buf)));
   });
   client.send = (m) => ws.send(msgpack.serialize(m));

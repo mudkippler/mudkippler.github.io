@@ -28,6 +28,16 @@ function playerCount(lobby) {
 const HP_TAUNT_THRESHOLDS = [75, 50, 25];
 const HP_TAUNT_STEP = { 75: 1, 50: 2, 25: 3 };
 
+// Stars are seeded inside these bounds — inset from the walls and clear of
+// the very bottom so their light pools are always fully reachable.
+const STAR_BOUNDS = { xMin: 60, xMax: 740, yMin: 80, yMax: 520 };
+
+// Rounding for the non-coordinate mech values (angles, fractions): two
+// decimals is plenty of precision for zone geometry and keeps the wire lean.
+function r2(n) {
+  return Math.round(n * 100) / 100;
+}
+
 // deps:
 //   say(lobby, text, intensity)  speak a boss line to the lobby
 //   emit(lobby, message)         broadcast a raw message object to the lobby
@@ -50,7 +60,8 @@ function createPhaseEngine({ say, emit, t }) {
         lobby.orbs = [0, 1].map(i => {
           const x = lobby.boss.x + (i === 0 ? -150 : 150);
           const y = lobby.boss.y + 50;
-          return { id: i, baseX: x, baseY: y, x, y, hp: def.orbHp, maxHp: def.orbHp, deadAt: null };
+          const kind = def.orbKinds && def.orbKinds[i];
+          return { id: i, kind, baseX: x, baseY: y, x, y, hp: def.orbHp, maxHp: def.orbHp, deadAt: null };
         });
       },
       onExit(lobby) {
@@ -110,6 +121,72 @@ function createPhaseEngine({ say, emit, t }) {
           }
         }
       }
+    },
+
+    // The sun-dominant phase: rotating rays sweep the arena, pulsing between
+    // telegraph and burning, while the moon orbits as a small satellite whose
+    // shadow is the safe wedge. All of it is broadcast as concrete values in
+    // lobby.mech (~30 bytes/tick) rather than derived from formulas
+    // client-side, for the same reason as storm's wind: every client's zones
+    // must agree without clock sync. The clients evaluate/render the zones
+    // and report damage taken (see the sunRays mechanic in mechanics.js).
+    sunDominant: {
+      onEnter(lobby) {
+        lobby.phaseState.startedAt = Date.now();
+      },
+      onExit(lobby) {
+        lobby.mech = null;
+      },
+      update(lobby, def, now) {
+        const elapsed = (now - lobby.phaseState.startedAt) / 1000;
+        // Starts at 0 (rays fade in from nothing on phase entry) and pulses.
+        const glow = 0.5 - 0.5 * Math.cos((elapsed * 1000 / def.glowCycleMs) * Math.PI * 2);
+        const moonAngle = elapsed * def.orbitSpeed;
+        lobby.mech = {
+          ray: r2((elapsed * def.raySpeed) % (Math.PI * 2)),
+          glow: r2(glow),
+          moon: {
+            x: t(lobby.boss.x + Math.cos(moonAngle) * def.orbitRadius),
+            y: t(lobby.boss.y + Math.sin(moonAngle) * def.orbitRadius)
+          }
+        };
+      }
+    },
+
+    // The moon-dominant phase: seeds stars at server-chosen spots so every
+    // player sees the same light pools — they're shared geography the team
+    // coordinates around, unlike bullets which can safely stay client-local.
+    // The twinkle/explosion/light timing all runs client-side from the
+    // event's arrival (see the starfield mechanic in mechanics.js).
+    moonDominant: {
+      onEnter(lobby) {
+        lobby.phaseState.nextStar = Date.now() + 800;
+      },
+      update(lobby, def, now) {
+        if (now < lobby.phaseState.nextStar) return;
+        lobby.phaseState.nextStar = now + def.starInterval;
+        emit(lobby, {
+          type: 'star',
+          x: t(STAR_BOUNDS.xMin + Math.random() * (STAR_BOUNDS.xMax - STAR_BOUNDS.xMin)),
+          y: t(STAR_BOUNDS.yMin + Math.random() * (STAR_BOUNDS.yMax - STAR_BOUNDS.yMin))
+        });
+      }
+    },
+
+    // The eclipse: broadcasts how far the moon has slid over the sun (0..1).
+    // Clients animate the disc from it and trigger the totality blind flash
+    // the moment it reaches 1 — the phase transition plus this one fraction
+    // is all the synchronization the whole sequence needs.
+    converge: {
+      onEnter(lobby) {
+        lobby.phaseState.startedAt = Date.now();
+      },
+      onExit(lobby) {
+        lobby.mech = null;
+      },
+      update(lobby, def, now) {
+        lobby.mech = { moonT: r2(Math.min(1, (now - lobby.phaseState.startedAt) / def.convergeMs)) };
+      }
     }
   };
 
@@ -129,6 +206,7 @@ function createPhaseEngine({ say, emit, t }) {
     const def = lobby.encounter.phases[index];
     lobby.phaseIndex = index;
     lobby.phaseState = {};
+    lobby.mech = null; // per-tick mechanic broadcast; the new behavior repopulates it if it has one
     if (def.bossHp != null) {
       lobby.boss.maxHp = def.bossHp * playerCount(lobby);
       lobby.boss.hp = lobby.boss.maxHp;

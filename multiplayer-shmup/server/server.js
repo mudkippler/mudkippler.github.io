@@ -44,8 +44,18 @@ const TICK_RATE = 15;
 const PLAYER_SPEED_PER_SEC = 150; // matches the client's prediction speed
 const PLAYER_BULLET_SPEED = 5; // matches the client's bullet speed, used to clamp relayed aim vectors
 const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report arbitrary damage
-const MISSILE_DAMAGE = 35; // bombardment explosions hit harder than a regular boss bullet
-const LIGHTNING_DAMAGE = 25; // storm's lightning strikes, between a regular bullet and a missile
+// Damage per playerDamage report, by source — server-defined so clients can
+// only report *that* a hazard hit them, never how hard. 'ray' and 'dark' are
+// zone damage-over-time ticks (one report per ZONE_TICK_MS of exposure, see
+// mechanics.js), so their per-report numbers read low but repeat.
+const PLAYER_DAMAGE_BY_SOURCE = {
+  bullet: BULLET_DAMAGE,
+  missile: 35, // bombardment explosions hit harder than a regular boss bullet
+  lightning: 25, // storm's lightning strikes, between a regular bullet and a missile
+  star: 25, // twin's exploding stars, telegraphed like lightning
+  ray: 12, // per tick standing in an active sun ray
+  dark: 1 // per tick lost in the moon phase's pitch black
+};
 const WIND_MAX_STRENGTH = 120; // px/sec, storm's strongest gusts (see the wind block in gameLoop)
 const UMBRELLA_BLOWN_GUST = 0.55; // gust fraction (0-1) above which the umbrella is blown away
 const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
@@ -64,7 +74,7 @@ const REVIVE_HEALTH = 50; // revived players come back at half health
 const TEAM_WIPE_RESET_DELAY = 4000; // ms
 const NAME_MAX_LENGTH = 16;
 const GRAVE_LIMIT = 50; // cap so init payload/memory don't grow unbounded
-const LOBBY_MAX_PLAYERS = 8;
+const LOBBY_MAX_PLAYERS = 10;
 // Grace period before an empty lobby is deleted. Must comfortably exceed the
 // client's respawn reconnect (~1.5s) so a solo player who dies can rejoin
 // their own lobby instead of finding it gone.
@@ -127,6 +137,7 @@ function createLobby(encounterId) {
     boss: { x: 400, y: 100, radius: 30, hp: encounter.phases[0].bossHp, maxHp: encounter.phases[0].bossHp },
     phaseIndex: 0, // index into encounter.phases; the phase def is authoritative for what's damageable/active
     phaseState: {}, // per-phase scratch for the phase's server behavior (see phases.js)
+    mech: null, // per-tick mechanic values some behaviors broadcast (ray angle, moon position, ...)
     orbs: [], // {id, baseX, baseY, x, y, hp, maxHp, deadAt} — spawned/owned by the twinOrbs behavior
     damageLog: {}, // id -> {name, color, dmg}
     graves: [], // {x, y, color} markers left where players have died
@@ -164,7 +175,7 @@ function publicEncounter(encounter) {
 }
 
 function publicOrbs(lobby) {
-  return lobby.orbs.map(o => ({ id: o.id, x: t(o.x), y: t(o.y), hp: o.hp, maxHp: o.maxHp }));
+  return lobby.orbs.map(o => ({ id: o.id, ...(o.kind ? { kind: o.kind } : {}), x: t(o.x), y: t(o.y), hp: o.hp, maxHp: o.maxHp }));
 }
 
 function broadcastLobbyState(lobby) {
@@ -411,10 +422,7 @@ wss.on('connection', (ws) => {
         if (now - player.lastTakenReport < DAMAGE_REPORT_MIN_INTERVAL) return;
         player.lastTakenReport = now;
 
-        // The client only reports *that* it was hit and by what — the amount
-        // is still fixed server-side per source so a client can't self-report
-        // arbitrary damage.
-        const damage = data.source === 'missile' ? MISSILE_DAMAGE : data.source === 'lightning' ? LIGHTNING_DAMAGE : BULLET_DAMAGE;
+        const damage = PLAYER_DAMAGE_BY_SOURCE[data.source] || BULLET_DAMAGE;
         player.health -= damage;
         if (player.health <= 0 && !player.dead) {
           player.health = 0;
@@ -620,9 +628,10 @@ function gameLoop() {
       phase: lobby.phaseIndex,
       orbs: publicOrbs(lobby),
       paused: lobby.paused,
-      // Omitted entirely outside storm's wind-active phases to save bytes on
-      // every other encounter/lobby's per-tick broadcast.
-      ...(lobby.wind ? { wind: { x: t(lobby.wind.x), y: t(lobby.wind.y), umbrella: lobby.wind.umbrella } } : {})
+      // wind/mech are omitted entirely outside the phases that use them to
+      // save bytes on every other encounter/lobby's per-tick broadcast.
+      ...(lobby.wind ? { wind: { x: t(lobby.wind.x), y: t(lobby.wind.y), umbrella: lobby.wind.umbrella } } : {}),
+      ...(lobby.mech ? { mech: lobby.mech } : {})
     }));
   }
 }

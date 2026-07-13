@@ -107,6 +107,17 @@ let mechState = {};
 // gusts instead of drifting apart with independently-computed randomness.
 let wind = { x: 0, y: 0 };
 
+// Per-tick mechanic values some phases broadcast (twin's ray angle / moon
+// position / eclipse fraction) — server-authoritative for the same reason as
+// wind: zone geometry has to agree across every client. Null outside those
+// phases.
+let mech = null;
+
+// Stars seeded by the server during twin's moon phase, stamped with their
+// local arrival time; the starfield mechanic drives their twinkle →
+// explosion → light-pool lifecycle from that timestamp.
+let bossStars = [];
+
 const movementKeys = {}; // Store current state of movement keys
 
 function send(message) {
@@ -349,6 +360,7 @@ function connect() {
             bossBullets = [];
             bossMissiles = [];
             bossLightning = [];
+            bossStars = [];
             mechState = {};
             setBossPortrait(encounter.id, 'base');
             applyBackgroundTheme(encounter.id);
@@ -393,7 +405,10 @@ function connect() {
 
             boss = { ...boss, ...data.boss };
             wind = data.wind || { x: 0, y: 0, umbrella: true };
+            mech = data.mech || null;
             const newPhaseIndex = data.phase || 0;
+            // Leftover stars don't outlive the phase that seeded them.
+            if (newPhaseIndex !== phaseIndex) bossStars = [];
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
             if (phaseDef().victory && newPhaseIndex === 0) myPos = null;
@@ -473,6 +488,13 @@ function connect() {
 
         if (data.type === 'grave') {
             graves.push({ x: data.x, y: data.y, color: data.color });
+            return;
+        }
+
+        if (data.type === 'star') {
+            // A star seeded by the server (twin's moon phase): its whole
+            // twinkle/explosion/light timeline runs off this local timestamp.
+            bossStars.push({ x: data.x, y: data.y, spawn: performance.now(), exploded: false });
             return;
         }
 
@@ -725,6 +747,12 @@ function updateLocalCombat(now, myPos, alive) {
             boss,
             orbs,
             wind,
+            mech,
+            stars: bossStars,
+            myPos,
+            alive,
+            send,
+            addDamagePopup,
             bossBullets,
             bossMissiles,
             bossLightning
@@ -901,7 +929,12 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive());
+    // Everything the renderer needs to draw the active mechanic's zones and
+    // effects (sun rays, darkness, stars, the eclipse) from the same values
+    // the damage checks use.
+    const mechView = { mechanic: phaseDef().mechanic, mech, stars: bossStars, params: phaseDef().params || {}, state: mechState };
+
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive(), mechView);
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
     updateBossBar(encounter, boss, phaseDef(), inGame);

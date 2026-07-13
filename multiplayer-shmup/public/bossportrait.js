@@ -4,15 +4,13 @@
 // showing a broken image):
 //   img/<encounterId>.png            — HP above 50%
 //   img/<encounterId>_injured.png    — HP at or below 50%
-//   img/<encounterId>_enraged.png    — phases with portrait: 'enraged' (the enrage chase)
-//   img/<encounterId>_defeat.png     — phases with portrait: 'defeat' (boss down)
+//   img/<encounterId>_<state>.png    — phases that pin a portrait state
+//                                      ('enraged', 'defeat', 'sun', ...)
 
 const containerEl = document.getElementById('boss-dialogue');
 const portraitImg = document.getElementById('boss-portrait-img');
 const bubbleEl = document.getElementById('boss-dialogue-bubble');
 const textEl = document.getElementById('boss-dialogue-text');
-
-const STATE_SUFFIX = { base: '', injured: '_injured', enraged: '_enraged', defeat: '_defeat' };
 
 let currentEncounterId = null;
 let currentState = null;
@@ -38,7 +36,7 @@ export function setBossPortrait(encounterId, state) {
     currentEncounterId = encounterId;
     currentState = state;
     portraitImg.style.display = 'none';
-    portraitImg.src = `img/${encounterId}${STATE_SUFFIX[state] || ''}.png`;
+    portraitImg.src = `img/${encounterId}${state && state !== 'base' ? `_${state}` : ''}.png`;
 }
 
 const DIALOGUE_DISPLAY_MS = 5000;

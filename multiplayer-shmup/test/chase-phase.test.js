@@ -69,7 +69,8 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
     `aimed shot targets close to the player's actual position (target ${JSON.stringify(target)}, player ${JSON.stringify({ x: myPos.x, y: myPos.y })})`
   );
 
-  // --- Entry via twin orbs cleared together ---
+  // --- Twin orbs cleared together advance the fight (into the sun phase —
+  // --- the full sun/moon/eclipse walk is covered in twin-guardians.test.js) ---
   const twinHost = makeClient('twinHost');
   await twinHost.open;
   twinHost.send({ type: 'createLobby', name: 'Carol', encounter: 'twin' });
@@ -101,10 +102,10 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
     (async () => { for (let i = 0; i < 30; i++) { twinFriend.send({ type: 'orbDamage', orbId: 1 }); await sleep(55); } })()
   ]);
   await sleep(300);
-  const twinChaseState = twinHost.lastState();
-  check(twinChaseState.phase === phaseIndex('twin', 'enrage'), `clearing both twin orbs together enters the enrage chase (phase was ${twinChaseState.phase})`);
+  const twinSunState = twinHost.lastState();
+  check(twinSunState.phase === phaseIndex('twin', 'sun'), `clearing both twin orbs together enters the sun phase (phase was ${twinSunState.phase})`);
   // Two players in this lobby: boss HP scales linearly with headcount.
-  check(twinChaseState.boss.maxHp === 1600, `twin's enrage chase uses its own HP pool (800 x2 players=1600), got ${twinChaseState.boss.maxHp}`);
+  check(twinSunState.boss.maxHp === 1600, `twin's sun phase uses its own HP pool (800 x2 players=1600), got ${twinSunState.boss.maxHp}`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });

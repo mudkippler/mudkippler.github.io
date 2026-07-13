@@ -1,4 +1,5 @@
 import { MISSILE_EXPLOSION_DURATION, LIGHTNING_WARNING_MS, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, STORM_UMBRELLA_X, STORM_UMBRELLA_Y, STORM_UMBRELLA_HALF_WIDTH } from './attacks.js';
+import { starLightRadius } from './mechanics.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -119,6 +120,190 @@ function drawStormUmbrella(active, dt) {
 let shakeEndTime = 0;
 const SHAKE_DURATION = 200; // ms
 const SHAKE_MAGNITUDE = 6; // px
+
+// --- Twin's sun/moon/eclipse mechanic visuals ------------------------------
+// All geometry comes from the same server-broadcast mech values and params
+// the damage checks in mechanics.js use, so what's drawn is exactly what
+// burns. Split into an under layer (ground zones, drawn beneath entities)
+// and an over layer (darkness/flashes that dim or cover the scene).
+
+const RAY_LENGTH = 950; // px, past every corner of the 800x600 arena
+
+// Sun phase (under layer): the rotating ray wedges, the moon satellite, and
+// its shadow — a dark annular sector cast away from the sun.
+function drawSunPhase(view, boss) {
+    const { mech, params } = view;
+    if (!mech) return;
+
+    const active = mech.glow >= params.rayActiveGlow;
+    // Telegraphing rays are faint; active ones glow with the pulse.
+    ctx.globalAlpha = active ? 0.18 + 0.22 * mech.glow : 0.04 + 0.12 * mech.glow;
+    ctx.fillStyle = active ? '#ffb43c' : '#ffe9a8';
+    for (let i = 0; i < params.rayCount; i++) {
+        const center = mech.ray + i * (Math.PI * 2 / params.rayCount);
+        ctx.beginPath();
+        ctx.moveTo(boss.x, boss.y);
+        ctx.arc(boss.x, boss.y, RAY_LENGTH, center - params.rayWidth / 2, center + params.rayWidth / 2);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Corona ring so the boss reads as the sun itself.
+    ctx.globalAlpha = 0.35 + 0.4 * mech.glow;
+    ctx.strokeStyle = '#ffd24d';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius + 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (mech.moon) {
+        const moonAng = Math.atan2(mech.moon.y - boss.y, mech.moon.x - boss.x);
+        const moonDist = Math.hypot(mech.moon.x - boss.x, mech.moon.y - boss.y);
+
+        // The shadow: starts slightly before the moon (matching the damage
+        // check's forgiveness) and runs outward.
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = '#0d1226';
+        ctx.beginPath();
+        ctx.arc(boss.x, boss.y, RAY_LENGTH, moonAng - params.shadowArc / 2, moonAng + params.shadowArc / 2);
+        ctx.arc(boss.x, boss.y, Math.max(0, moonDist - 20), moonAng + params.shadowArc / 2, moonAng - params.shadowArc / 2, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // The moon satellite itself.
+        ctx.fillStyle = '#cdd6e8';
+        ctx.strokeStyle = '#8a94ad';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mech.moon.x, mech.moon.y, params.moonRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
+}
+
+// Moon phase (over layer): pitch-black darkness with even-odd holes punched
+// out for every light source, then the stars' twinkles, explosions, and
+// light-pool rims drawn on top so they stay visible in the dark.
+function drawMoonPhase(view, boss) {
+    const { stars, params } = view;
+    const now = performance.now();
+
+    ctx.beginPath();
+    ctx.rect(0, 0, canvas.width, canvas.height);
+    ctx.moveTo(boss.x + params.moonGlowRadius, boss.y);
+    ctx.arc(boss.x, boss.y, params.moonGlowRadius, 0, Math.PI * 2);
+    for (const star of stars) {
+        const r = starLightRadius(star, now, params);
+        if (r > 0) {
+            ctx.moveTo(star.x + r, star.y);
+            ctx.arc(star.x, star.y, r, 0, Math.PI * 2);
+        }
+    }
+    ctx.fillStyle = 'rgba(4, 6, 16, 0.82)';
+    ctx.fill('evenodd');
+
+    // Moonlight rim around the boss's own glow.
+    ctx.globalAlpha = 0.4;
+    ctx.strokeStyle = '#cdd6e8';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, params.moonGlowRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    for (const star of stars) {
+        const age = now - star.spawn;
+        if (age < params.twinkleMs) {
+            // Twinkle telegraph: a four-point sparkle that grows and pulses
+            // faster as the explosion nears.
+            const dangerFrac = age / params.twinkleMs;
+            const size = 4 + dangerFrac * 8;
+            ctx.globalAlpha = 0.45 + 0.45 * Math.abs(Math.sin(now / (140 - 90 * dangerFrac)));
+            ctx.strokeStyle = '#fff7d0';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(star.x - size, star.y);
+            ctx.lineTo(star.x + size, star.y);
+            ctx.moveTo(star.x, star.y - size);
+            ctx.lineTo(star.x, star.y + size);
+            ctx.stroke();
+        } else {
+            const sinceBoom = age - params.twinkleMs;
+            if (sinceBoom < 250) {
+                // The explosion itself: a bright expanding ring over the blast radius.
+                const p = sinceBoom / 250;
+                ctx.globalAlpha = 1 - p;
+                ctx.strokeStyle = '#fffbe8';
+                ctx.lineWidth = 4 * (1 - p) + 1;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, params.starBlastRadius * p, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            // Rim of the shrinking light pool.
+            const r = starLightRadius(star, now, params);
+            if (r > 0) {
+                ctx.globalAlpha = 0.35;
+                ctx.strokeStyle = '#e8f0ff';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+    }
+    ctx.globalAlpha = 1;
+}
+
+// Eclipse (over layer): the corona blazing behind, the moon disc sliding
+// over the sun as mech.moonT ramps 0..1, and the totality blind flash.
+const ECLIPSE_MOON_START = { x: 170, y: -120 }; // where the disc slides in from, relative to the boss
+
+function drawEclipse(view, boss) {
+    const { mech, params, state } = view;
+    const now = performance.now();
+    const moonT = mech ? mech.moonT : 1;
+
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = '#ffd24d';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius + 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = '#10121c';
+    ctx.strokeStyle = '#5a6480';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(boss.x + ECLIPSE_MOON_START.x * (1 - moonT), boss.y + ECLIPSE_MOON_START.y * (1 - moonT), boss.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Totality blinds: a full white-out fading back over blindMs. The
+    // timestamp is stamped by the eclipse mechanic the moment moonT hits 1,
+    // so the flash and the firing pause share one clock.
+    if (state.blindStart) {
+        const p = (now - state.blindStart) / params.blindMs;
+        if (p < 1) {
+            ctx.globalAlpha = 1 - p;
+            ctx.fillStyle = '#fffdf4';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1;
+        }
+    }
+}
+
+function drawMechanicUnder(view, boss) {
+    if (view && view.mechanic === 'sunRays') drawSunPhase(view, boss);
+}
+
+function drawMechanicOver(view, boss) {
+    if (!view) return;
+    if (view.mechanic === 'starfield') drawMoonPhase(view, boss);
+    else if (view.mechanic === 'eclipse') drawEclipse(view, boss);
+}
 
 // Bombardment hazards: the boss visibly fires a rocket that arcs offscreen,
 // then — once it's out of view — a pulsing telegraph ring appears on the
@@ -245,7 +430,7 @@ function drawLightning(bolts) {
 
 let lastDrawTime = performance.now();
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef, stormUmbrellaActive) {
+export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef, stormUmbrellaActive, mechView) {
     // Reset any transform left over from a previous shaking frame before
     // clearing, so the clear always covers the full physical canvas.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -262,6 +447,10 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
 
     // Storm's umbrella, drawn early so players/bullets render on top of it.
     drawStormUmbrella(!!stormUmbrellaActive, dt);
+
+    // Ground-level mechanic zones (sun rays, the moon's shadow) — under
+    // everything so entities read on top of them.
+    drawMechanicUnder(mechView, boss);
 
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
@@ -286,10 +475,12 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     // players can see what still needs to drop before the revive window closes
     if (orbs) {
         const ORB_RADIUS = 18;
+        // Orbs can carry a kind (twin's sun/moon pair); plain orbs stay violet.
+        const ORB_COLORS = { sun: '#ffd24d', moon: '#cdd6e8' };
         for (const orb of orbs) {
             const alive = orb.hp > 0;
             ctx.globalAlpha = alive ? 1 : 0.25;
-            ctx.fillStyle = 'violet';
+            ctx.fillStyle = ORB_COLORS[orb.kind] || 'violet';
             ctx.beginPath();
             ctx.arc(orb.x, orb.y, ORB_RADIUS, 0, Math.PI * 2);
             ctx.fill();
@@ -386,7 +577,8 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         3: { color: 'orange', size: 8 },      // enrage-chase aimed shots
         4: { color: 'magenta', size: 5 },     // spiral arms
         5: { color: 'gold', size: 5 },        // sweeping wave fan
-        6: { color: 'greenyellow', size: 5 }  // acid rain droplets
+        6: { color: 'greenyellow', size: 5 }, // acid rain droplets
+        8: { color: '#e8d5ff', size: 6 }      // eclipse corona rings
     };
     for (const b of bossBullets) {
         if (b.type === 7) {
@@ -412,6 +604,11 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
 
     drawMissiles(bossMissiles, boss);
     if (bossLightning) drawLightning(bossLightning);
+
+    // Scene-covering mechanic effects (the moon phase's darkness, the
+    // eclipse disc and blind flash) — over the entities they dim, but under
+    // the damage popups so those stay readable.
+    drawMechanicOver(mechView, boss);
 
     // A lightning strike briefly brightens the whole scene.
     const nowFlash = performance.now();

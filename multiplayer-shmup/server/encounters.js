@@ -83,7 +83,7 @@ const ENCOUNTERS = {
     phases: [
       {
         id: 'main',
-        bossHp: 2500, bossDamageable: true,
+        bossHp: 1000, bossDamageable: true,
         behavior: 'stationary',
         mechanic: 'ring', params: TWIN_RING,
         transition: 'bossHpZero',
@@ -104,13 +104,91 @@ const ENCOUNTERS = {
         // window, so it takes two players focusing different orbs.
         id: 'orbs',
         orbsDamageable: true,
-        behavior: 'twinOrbs', orbHp: 300, orbKillWindow: 3000,
+        behavior: 'twinOrbs', orbHp: 200, orbKillWindow: 3000,
+        orbKinds: ['sun', 'moon'], // rendered gold/silver — they foreshadow the phases that follow
         mechanic: 'orbRings', params: { attackRate: 200, numberOfAngles: 4, bulletSpeed: 1 },
         transition: 'orbsDead',
-        subtitle: 'Destroy the twin orbs — together',
+        subtitle: 'Destroy the sun and moon — together',
         say: {
           enter: ["i'm just getting started.."],
           orbsRevive: ['you must strike them down together!']
+        }
+      },
+      {
+        // The sun takes over the main body. Rotating rays sweep the arena,
+        // pulsing between harmless telegraph and burning — the moon keeps
+        // orbiting as a small satellite whose shadow cuts a safe wedge
+        // through them. The server broadcasts the ray angle / glow / moon
+        // position each tick (see sunDominant in phases.js) so every
+        // client's zones agree without clock sync.
+        id: 'sun',
+        bossHp: 400, bossDamageable: true,
+        behavior: 'sunDominant',
+        raySpeed: 0.22, // rad/s the rays sweep around the sun
+        glowCycleMs: 5200, // one full fade-in/fade-out pulse of the rays
+        orbitRadius: 140, orbitSpeed: 0.8, // the moon satellite's orbit (rad/s)
+        mechanic: 'sunRays',
+        params: { rayCount: 4, rayWidth: 0.55, rayActiveGlow: 0.55, shadowArc: 0.5, moonRadius: 13 },
+        transition: 'bossHpZero',
+        portrait: 'sun', bossTint: '#ffcc44',
+        subtitle: "The sun blazes — shelter in the moon's shadow",
+        say: {
+          intensity: 1,
+          enter: ['The SUN takes the sky! Burn in my radiance!'],
+          hp: {
+            75: ['Feel the daylight sear!'],
+            50: ['My corona is ENDLESS!'],
+            25: ['The light... flickers?!']
+          }
+        }
+      },
+      {
+        // Then the moon's turn: the arena goes pitch black and the dark
+        // itself burns. The server seeds stars ('star' events, see
+        // moonDominant in phases.js); each twinkles as a telegraph, explodes,
+        // and leaves a shrinking pool of starlight to shelter in. The moon
+        // itself gives off a small glow as the fallback refuge.
+        id: 'moon',
+        bossHp: 400, bossDamageable: true,
+        behavior: 'moonDominant',
+        starInterval: 1100, // ms between seeded stars
+        mechanic: 'starfield',
+        params: { twinkleMs: 1300, lightMs: 4500, lightRadius: 95, starBlastRadius: 55, moonGlowRadius: 110 },
+        transition: 'bossHpZero',
+        portrait: 'moon', bossTint: '#c9d4ea',
+        subtitle: 'Pitch black burns — stay in the starlight',
+        say: {
+          intensity: 2,
+          enter: ['Then darkness. The MOON will swallow you whole.'],
+          hp: {
+            75: ['The stars are hungry tonight.'],
+            50: ['Lost in the dark yet?'],
+            25: ['No... the dawn is coming—']
+          }
+        }
+      },
+      {
+        // Sun and moon converge: the moon disc slides over the sun
+        // (broadcast as mech.moonT, see converge in phases.js), totality
+        // blinds everyone for a beat, then the corona fires dense rings with
+        // a single rotating safe gap.
+        id: 'eclipse',
+        bossHp: 700, bossDamageable: true,
+        behavior: 'converge',
+        convergeMs: 2600, // how long the moon takes to slide over the sun
+        mechanic: 'eclipse',
+        params: { attackRate: 520, numberOfAngles: 18, bulletSpeed: 2.3, gapArc: 1.0, blindMs: 1000 },
+        transition: 'bossHpZero',
+        portrait: 'eclipse', bossTint: '#ffcc44',
+        subtitle: 'Totality',
+        say: {
+          intensity: 3,
+          enter: ['Sun and moon — TOGETHER. Witness the eclipse!'],
+          hp: {
+            75: ['There is no light left for you!'],
+            50: ['THE CORONA CONSUMES ALL!'],
+            25: ['the alignment... is breaking—']
+          }
         }
       },
       {
@@ -119,7 +197,7 @@ const ENCOUNTERS = {
         mechanic: 'ring', params: TWIN_RING,
         say: {
           intensity: 3,
-          enter: ['impossible... you struck as one... but I am not finished!'],
+          enter: ["No sun... no moon... then I'll tear you apart MYSELF!"],
           hp: {
             75: ['I said ENOUGH!', 'Both blades. No mercy now.'],
             50: ['I WILL NOT FALL TO THIS!', 'Stand still and DIE!'],
