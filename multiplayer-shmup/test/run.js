@@ -7,6 +7,12 @@ const WebSocket = require('ws');
 
 const TEST_PORT = process.env.TEST_PORT || 3100;
 const SERVER_PATH = path.join(__dirname, '..', 'server', 'server.js');
+// Scales down real-fight HP pools and the eclipse convergence timer (see
+// encounters.js) and the team-wipe reset delay (see server.js) so suites
+// don't spend most of their wall-clock time waiting on those at real-player
+// pace. Set FAST_TESTS=0 in the environment to run against unscaled,
+// production-accurate values instead.
+const FAST_TESTS = process.env.FAST_TESTS || '1';
 
 function waitForServer(timeout = 5000) {
   const start = Date.now();
@@ -26,7 +32,7 @@ function waitForServer(timeout = 5000) {
 function runSuite(file) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [file], {
-      env: { ...process.env, TEST_PORT },
+      env: { ...process.env, TEST_PORT, FAST_TESTS },
       stdio: 'inherit'
     });
     child.on('exit', (code) => resolve(code === 0));
@@ -45,7 +51,7 @@ function runSuite(file) {
   }
 
   const server = spawn(process.execPath, [SERVER_PATH], {
-    env: { ...process.env, PORT: TEST_PORT },
+    env: { ...process.env, PORT: TEST_PORT, FAST_TESTS },
     stdio: 'ignore'
   });
 

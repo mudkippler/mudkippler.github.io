@@ -295,8 +295,55 @@ function drawEclipse(view, boss) {
     }
 }
 
-function drawMechanicUnder(view, boss) {
+// --- Bombardment's launchCodes mechanic ------------------------------------
+// Each player's maze occupies its own slice of the shared 800x600 canvas
+// (see mazeSlots in server/phases.js), so ships/collisions need no special
+// coordinate handling — the maze is just terrain that happens to be lethal.
+// Layout is static for the phase (sent once as 'mazeLayout'); only the
+// countdown (mech.mazeTimeLeft) updates every tick.
+function drawMazes(view, myId) {
+    const { maze, mech } = view;
+    if (!maze || !maze.mazes) return;
+
+    for (const id in maze.mazes) {
+        const m = maze.mazes[id];
+        ctx.globalAlpha = Number(id) === myId ? 1 : 0.5;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+        ctx.fillRect(m.rect.x, m.rect.y, m.rect.w, m.rect.h);
+
+        ctx.strokeStyle = '#9fe6ff';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        for (const w of m.walls) {
+            ctx.beginPath();
+            ctx.moveTo(w.x1, w.y1);
+            ctx.lineTo(w.x2, w.y2);
+            ctx.stroke();
+        }
+        ctx.lineCap = 'butt';
+
+        ctx.globalAlpha *= 0.6 + 0.4 * Math.sin(performance.now() / 200);
+        ctx.strokeStyle = '#4dff88';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(m.exit.x, m.exit.y, m.cellSize * 0.3, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    if (mech && mech.mazeTimeLeft != null) {
+        ctx.font = 'bold 28px impact';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = mech.mazeTimeLeft < 5000 ? '#ff5555' : '#ffffff';
+        ctx.fillText(`${(mech.mazeTimeLeft / 1000).toFixed(1)}s`, canvas.width / 2, 30);
+        ctx.textAlign = 'left';
+    }
+}
+
+function drawMechanicUnder(view, boss, myId) {
     if (view && view.mechanic === 'sunRays') drawSunPhase(view, boss);
+    else if (view && view.mechanic === 'maze') drawMazes(view, myId);
 }
 
 function drawMechanicOver(view, boss) {
@@ -375,6 +422,21 @@ function drawMissiles(missiles, boss) {
 let flashEndTime = 0;
 const FLASH_DURATION = 120; // ms, the screen-wide brightness pulse on a lightning strike
 
+let explosionShakeEndTime = 0;
+let explosionFlashEndTime = 0;
+const EXPLOSION_SHAKE_DURATION = 700; // ms, longer/harder than a regular missile/lightning hit
+const EXPLOSION_SHAKE_MAGNITUDE = 22; // px
+const EXPLOSION_FLASH_DURATION = 550; // ms
+
+// Bombardment's launchCodes maze: if the whole party runs out the clock
+// (see the launchCodes timeout in server/phases.js), every screen erupts
+// together rather than each death reading as a quiet, separate grave.
+export function triggerScreenExplosion() {
+    const now = performance.now();
+    explosionShakeEndTime = now + EXPLOSION_SHAKE_DURATION;
+    explosionFlashEndTime = now + EXPLOSION_FLASH_DURATION;
+}
+
 // Storm lightning: a dashed vertical bar telegraphs the strike column, then
 // a jagged bolt (regenerated fresh per strike so it never repeats) flashes
 // in as the actual hitbox, paired with a screen shake + brightness pulse.
@@ -444,13 +506,17 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         const remaining = (shakeEndTime - now) / SHAKE_DURATION;
         ctx.translate((Math.random() - 0.5) * 2 * SHAKE_MAGNITUDE * remaining, (Math.random() - 0.5) * 2 * SHAKE_MAGNITUDE * remaining);
     }
+    if (now < explosionShakeEndTime) {
+        const remaining = (explosionShakeEndTime - now) / EXPLOSION_SHAKE_DURATION;
+        ctx.translate((Math.random() - 0.5) * 2 * EXPLOSION_SHAKE_MAGNITUDE * remaining, (Math.random() - 0.5) * 2 * EXPLOSION_SHAKE_MAGNITUDE * remaining);
+    }
 
     // Storm's umbrella, drawn early so players/bullets render on top of it.
     drawStormUmbrella(!!stormUmbrellaActive, dt);
 
-    // Ground-level mechanic zones (sun rays, the moon's shadow) — under
-    // everything so entities read on top of them.
-    drawMechanicUnder(mechView, boss);
+    // Ground-level mechanic zones (sun rays, the moon's shadow, launchCodes'
+    // mazes) — under everything so entities read on top of them.
+    drawMechanicUnder(mechView, boss, myId);
 
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
@@ -530,6 +596,16 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
         ctx.beginPath();
         ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
         ctx.fill();
+
+        // Launch codes: a green ring marks a player who's already cleared
+        // their maze and is just waiting on the rest of the team.
+        if (p.finished) {
+            ctx.strokeStyle = '#4dff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, PLAYER_RADIUS + 4, 0, Math.PI * 2);
+            ctx.stroke();
+        }
 
         // Name tag
         if (p.name) {
@@ -615,6 +691,15 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     if (nowFlash < flashEndTime) {
         ctx.globalAlpha = ((flashEndTime - nowFlash) / FLASH_DURATION) * 0.35;
         ctx.fillStyle = '#eaffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.globalAlpha = 1;
+    }
+
+    // Whole-party wipe on a launchCodes timeout: a hard red-white flash,
+    // bigger and slower to fade than a routine hit's flash above.
+    if (nowFlash < explosionFlashEndTime) {
+        ctx.globalAlpha = ((explosionFlashEndTime - nowFlash) / EXPLOSION_FLASH_DURATION) * 0.85;
+        ctx.fillStyle = '#ff3300';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.globalAlpha = 1;
     }

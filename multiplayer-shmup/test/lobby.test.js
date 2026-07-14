@@ -1,6 +1,6 @@
 // E2E coverage of the lobby system: create/join, encounters, host controls,
 // multiple concurrent lobbies, and host handoff.
-const { check, finish, makeClient, sleep } = require('./helpers');
+const { check, finish, makeClient, sleep, phaseHp } = require('./helpers');
 
 (async () => {
   // Host creates a lobby with the 'storm' encounter
@@ -11,7 +11,8 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   check(/^[A-Z2-9]{5}$/.test(joined.code), `lobby code format (${joined.code})`);
   check(joined.hostId === joined.id, 'creator is host');
   check(joined.started === false, 'lobby not started on create');
-  check(joined.encounter.id === 'storm' && joined.boss.maxHp === 3500, 'storm encounter applied (boss 3500 HP)');
+  const stormMainHp = phaseHp('storm', 'main', 1);
+  check(joined.encounter.id === 'storm' && joined.boss.maxHp === stormMainHp, `storm encounter applied (boss ${stormMainHp} HP)`);
 
   // Friend joins via the code, providing a name
   const friend = makeClient('friend');
@@ -31,7 +32,8 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   other.send({ type: 'createLobby', name: 'Carol', encounter: 'twin' });
   const oJoined = await other.waitFor('joined');
   check(oJoined.code !== joined.code, 'second lobby has a different code');
-  check(oJoined.encounter.id === 'twin' && oJoined.boss.maxHp === 2500, 'second lobby has its own encounter');
+  const twinMainHp = phaseHp('twin', 'main', 1);
+  check(oJoined.encounter.id === 'twin' && oJoined.boss.maxHp === twinMainHp, `second lobby has its own encounter (${twinMainHp} HP)`);
 
   // Non-host cannot start; host can
   friend.send({ type: 'startGame' });
@@ -57,14 +59,13 @@ const { check, finish, makeClient, sleep } = require('./helpers');
   check(lJoined.started === true, 'late joiner sees started=true');
 
   // Damage goes to the right lobby's boss. Two players were in this lobby
-  // when the fight started (boss HP scales linearly with headcount), so the
-  // pool is 3500 x2 = 7000 — the late joiner below doesn't retroactively
-  // rescale it.
+  // when the fight started (boss HP scales linearly with headcount) — the
+  // late joiner below doesn't retroactively rescale it.
   host.send({ type: 'bossDamage' });
   await sleep(300);
   const lastState = [...host.messages].reverse().find(m => m.type === 'state');
   const otherBossFine = ![...other.messages].some(m => m.type === 'state');
-  check(lastState.boss.hp === 6990 && otherBossFine, `boss damage scoped to own lobby (hp=${lastState.boss.hp})`);
+  check(lastState.boss.hp === stormMainHp * 2 - 10 && otherBossFine, `boss damage scoped to own lobby (hp=${lastState.boss.hp})`);
 
   // Leaderboard carries names — wait for a fresh broadcast (one sent after
   // bossDamage above), not a stale one already queued from before it.

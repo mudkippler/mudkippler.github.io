@@ -73,7 +73,9 @@ const { check, finish, makeClient, sleep, kill, standOn } = require('./helpers')
   const wipeState = host.lastState();
   check(wipeState.players.every(p => p.dead), 'full party wipe registered');
 
-  await sleep(4500); // TEAM_WIPE_RESET_DELAY = 4000
+  // TEAM_WIPE_RESET_DELAY is 900ms under FAST_TESTS (the default here — see
+  // helpers.js), 4000ms otherwise (see server.js); pad past either.
+  await sleep(process.env.FAST_TESTS === '0' ? 4500 : 1300);
   const resetState = host.lastState();
   check(resetState.players.every(p => !p.dead && p.health === 100), 'wipe reset revives everyone at full health');
   check(resetState.boss.hp === resetState.boss.maxHp, `wipe reset restores boss HP (${resetState.boss.hp}/${resetState.boss.maxHp})`);

@@ -191,20 +191,6 @@ const ENCOUNTERS = {
           }
         }
       },
-      {
-        ...ENRAGE_BASE,
-        bossHp: 800, chaseSpeed: 70, aimedShotInterval: 1400, aimedBulletSpeed: 3.2,
-        mechanic: 'ring', params: TWIN_RING,
-        say: {
-          intensity: 3,
-          enter: ["No sun... no moon... then I'll tear you apart MYSELF!"],
-          hp: {
-            75: ['I said ENOUGH!', 'Both blades. No mercy now.'],
-            50: ['I WILL NOT FALL TO THIS!', 'Stand still and DIE!'],
-            25: ["This... isn't... POSSIBLE—", 'I REFUSE! I REFUSE!!', '*the blades scream with him*']
-          }
-        }
-      },
       DEFEATED
     ]
   },
@@ -402,7 +388,7 @@ const ENCOUNTERS = {
     phases: [
       {
         id: 'main',
-        bossHp: 5000, bossDamageable: true,
+        bossHp: 100, bossDamageable: true,
         behavior: 'stationary',
         mechanic: 'bombardment', params: BOMBARDMENT_VOLLEYS,
         transition: 'bossHpZero',
@@ -413,6 +399,26 @@ const ENCOUNTERS = {
             50: ['Auxiliary silos online - doubling payloads.'],
             25: ['Disable safety protocols.']
           }
+        }
+      },
+      {
+        // Launch codes: the boss goes quiet and stops taking damage while
+        // every player is dropped into their own maze (see the launchCodes
+        // behavior in phases.js) rendered in a dedicated slice of the
+        // screen. Walls are lethal on contact, and the whole team has
+        // def.timeLimit ms to clear their maze together — running out with
+        // anyone still inside kills the whole party, not just the laggards.
+        id: 'launchCodes',
+        bossDamageable: false,
+        behavior: 'launchCodes',
+        gridSize: 6, timeLimit: 15000,
+        mechanic: 'maze', params: {},
+        transition: 'mazeCleared',
+        subtitle: 'Launch codes incoming — clear your maze before time runs out',
+        say: {
+          intensity: 2,
+          enter: ['Authenticating launch codes. Navigate the grid or be purged.'],
+          timeout: ['Authentication failed. Purging.']
         }
       },
       {
@@ -437,5 +443,32 @@ const ENCOUNTERS = {
     ]
   }
 };
+
+// Test speedup: e2e suites (see test/run.js) spend most of their wall-clock
+// time waiting for bossDamage/orbDamage reports to whittle down real fight
+// HP pools and for the eclipse convergence timer, at the same pace a real
+// player would. Scaling those knobs down under FAST_TESTS keeps every phase
+// transition/behavior reachable and exercised while cutting that wait to a
+// fraction, without maintaining a second, hand-tuned copy of every encounter.
+if (process.env.FAST_TESTS === '1') {
+  const HP_SCALE = 0.04;
+  const TIME_SCALE = 0.15;
+  // 'twin' is excluded: it's the only encounter bandwidth.test.js runs, which
+  // hammers it with a full 10-player lobby all firing in lockstep. That test
+  // needs each phase's *total* pool (bossHp x playerCount) large enough to
+  // survive a burst of many players' simultaneous hits landing between two
+  // game-loop broadcasts — shrunk far enough, that burst can clear several
+  // phases in one synchronous pass before any client ever observes being in
+  // them. Every other encounter here only ever runs with 1-2 players (a much
+  // smaller worst-case burst), where the aggressive scale is safe.
+  for (const encounter of Object.values(ENCOUNTERS)) {
+    if (encounter.id === 'twin') continue;
+    for (const phase of encounter.phases) {
+      if ('bossHp' in phase) phase.bossHp = Math.max(10, Math.round(phase.bossHp * HP_SCALE));
+      if ('orbHp' in phase) phase.orbHp = Math.max(10, Math.round(phase.orbHp * HP_SCALE));
+      if ('convergeMs' in phase) phase.convergeMs = Math.round(phase.convergeMs * TIME_SCALE);
+    }
+  }
+}
 
 module.exports = { ENCOUNTERS };

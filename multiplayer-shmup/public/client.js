@@ -1,4 +1,4 @@
-import { draw } from './renderer.js';
+import { draw, triggerScreenExplosion } from './renderer.js';
 import { updateHUD } from './hud.js';
 import { updateLeaderboard } from './leaderboard.js';
 import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js';
@@ -117,6 +117,12 @@ let mech = null;
 // local arrival time; the starfield mechanic drives their twinkle →
 // explosion → light-pool lifecycle from that timestamp.
 let bossStars = [];
+
+// Bombardment's launchCodes phase: one maze per player, broadcast once on
+// phase entry (see the 'mazeLayout' handler below) rather than per-tick like
+// wind/mech — the layout is fixed for the whole phase, only the countdown
+// (mech.mazeTimeLeft) changes tick to tick.
+let mazeLayout = null;
 
 const movementKeys = {}; // Store current state of movement keys
 
@@ -361,6 +367,7 @@ function connect() {
             bossMissiles = [];
             bossLightning = [];
             bossStars = [];
+            mazeLayout = null;
             mechState = {};
             setBossPortrait(encounter.id, 'base');
             applyBackgroundTheme(encounter.id);
@@ -412,6 +419,12 @@ function connect() {
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
             if (phaseDef().victory && newPhaseIndex === 0) myPos = null;
+            // Entering launchCodes: the server just teleported everyone to
+            // their maze's start, discontinuously far from wherever we were
+            // predicting — re-snap instead of drifting/walking there.
+            if (newPhaseIndex !== phaseIndex && (encounter.phases[newPhaseIndex] || {}).mechanic === 'maze') {
+                myPos = null;
+            }
             // Any transition back to the opening phase means the encounter
             // was reset (mid-fight restart, post-victory restart, or an
             // automatic team wipe) — mechanic scratch state like
@@ -488,6 +501,23 @@ function connect() {
 
         if (data.type === 'grave') {
             graves.push({ x: data.x, y: data.y, color: data.color });
+            return;
+        }
+
+        if (data.type === 'mazeTimeout') {
+            // Launch codes ran out with someone still inside their maze
+            // (see the launchCodes timeout in server/phases.js) — the whole
+            // party wipes together, so every screen erupts, not just the
+            // laggards'.
+            triggerScreenExplosion();
+            return;
+        }
+
+        if (data.type === 'mazeLayout') {
+            // One-off broadcast on phase entry (see launchCodes in
+            // server/phases.js): every player's maze walls/start/exit,
+            // fixed for the whole phase.
+            mazeLayout = { timeLimit: data.timeLimit, mazes: data.mazes };
             return;
         }
 
@@ -932,7 +962,7 @@ function gameLoop() {
     // Everything the renderer needs to draw the active mechanic's zones and
     // effects (sun rays, darkness, stars, the eclipse) from the same values
     // the damage checks use.
-    const mechView = { mechanic: phaseDef().mechanic, mech, stars: bossStars, params: phaseDef().params || {}, state: mechState };
+    const mechView = { mechanic: phaseDef().mechanic, mech, stars: bossStars, params: phaseDef().params || {}, state: mechState, maze: mazeLayout };
 
     draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive(), mechView);
     updateHUD(myId, Object.values(players));

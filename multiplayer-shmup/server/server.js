@@ -71,7 +71,11 @@ const REVIVE_TIME = 3000; // ms of continuous overlap
 // fraction of the fill rate, so a brief interruption isn't a full restart.
 const REVIVE_DECAY_MULTIPLIER = 0.4;
 const REVIVE_HEALTH = 50; // revived players come back at half health
-const TEAM_WIPE_RESET_DELAY = 4000; // ms
+// e2e tests (test/run.js) set FAST_TESTS=1 so a full party wipe doesn't cost
+// every suite a real 4s wait — see the matching bossHp/orbHp/convergeMs
+// scaling in encounters.js. Kept well above revive.test.js's ~500ms "still
+// wiped" checkpoint so the reset doesn't race that assertion.
+const TEAM_WIPE_RESET_DELAY = process.env.FAST_TESTS === '1' ? 900 : 4000; // ms
 const NAME_MAX_LENGTH = 16;
 const GRAVE_LIMIT = 50; // cap so init payload/memory don't grow unbounded
 const LOBBY_MAX_PLAYERS = 10;
@@ -158,13 +162,40 @@ function bossSay(lobby, text, intensity = 0) {
   lobbyBroadcast(lobby, serialize({ type: 'bossSay', text, intensity }));
 }
 
+// Kills a player outright: marks them dead, drops a grave, tells their own
+// socket, and starts the team-wipe clock if that was the last one standing.
+// Shared by the playerDamage handler (health hits zero) and any server-side
+// hazard that insta-kills (e.g. the launchCodes maze's walls/timeout — see
+// phases.js), so both paths leave the lobby in the same state.
+function killPlayer(lobby, player, now) {
+  if (player.dead) return;
+  player.health = 0;
+  player.dead = true;
+  player.reviveProgress = 0;
+
+  const grave = { x: t(player.x), y: t(player.y), color: player.color };
+  lobby.graves.push(grave);
+  if (lobby.graves.length > GRAVE_LIMIT) lobby.graves.shift();
+  lobbyBroadcast(lobby, serialize({ type: 'grave', ...grave }));
+
+  if (player.ws && player.ws.readyState === WebSocket.OPEN) {
+    player.ws.send(serialize({ type: 'dead' }));
+  }
+
+  if (Object.values(lobby.players).every(p => p.dead)) {
+    lobby.wipeAt = now;
+    bossSay(lobby, 'and so falls your whole party...');
+  }
+}
+
 // Drives each lobby through its encounter's phase list — phase entry/exit,
 // HP-milestone dialogue, and the per-tick boss behaviors all live in
 // phases.js; the encounter/phase data itself lives in encounters.js.
 const phases = createPhaseEngine({
   say: bossSay,
   emit: (lobby, message) => lobbyBroadcast(lobby, serialize(message)),
-  t
+  t,
+  killPlayer
 });
 
 // The encounter object forwarded to clients on join/change: the same phase
@@ -424,27 +455,9 @@ wss.on('connection', (ws) => {
 
         const damage = PLAYER_DAMAGE_BY_SOURCE[data.source] || BULLET_DAMAGE;
         player.health -= damage;
-        if (player.health <= 0 && !player.dead) {
-          player.health = 0;
-          player.dead = true;
-          player.reviveProgress = 0;
-
-          const grave = { x: t(player.x), y: t(player.y), color: player.color };
-          lobby.graves.push(grave);
-          if (lobby.graves.length > GRAVE_LIMIT) lobby.graves.shift();
-          lobbyBroadcast(lobby, serialize({ type: 'grave', ...grave }));
-
-          // Death is permanent: the socket stays open so the player can
-          // spectate and be revived by a teammate standing on the body.
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(serialize({ type: 'dead' }));
-          }
-
-          if (Object.values(lobby.players).every(p => p.dead)) {
-            lobby.wipeAt = now;
-            bossSay(lobby, 'and so falls your whole party...');
-          }
-        }
+        // Death is permanent: the socket stays open so the player can
+        // spectate and be revived by a teammate standing on the body.
+        if (player.health <= 0) killPlayer(lobby, player, now);
       } else if (data.type === 'shot') {
         // Relay the shot origin and aim direction to teammates so they can
         // render ally bullets locally.
@@ -622,7 +635,10 @@ function gameLoop() {
       type: 'state',
       players: Object.values(lobby.players).map(p => ({
         id: p.id, x: t(p.x), y: t(p.y), color: p.color, health: p.health, name: p.name,
-        dead: p.dead, revive: p.dead ? t(p.reviveProgress / REVIVE_TIME) : 0
+        dead: p.dead, revive: p.dead ? t(p.reviveProgress / REVIVE_TIME) : 0,
+        // Only meaningful during launchCodes (see phases.js); harmless
+        // false elsewhere.
+        finished: !!(lobby.phaseState.reached && lobby.phaseState.reached.has(p.id))
       })),
       boss: { x: t(lobby.boss.x), y: t(lobby.boss.y), hp: lobby.boss.hp, maxHp: lobby.boss.maxHp },
       phase: lobby.phaseIndex,

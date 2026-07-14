@@ -38,11 +38,125 @@ function r2(n) {
   return Math.round(n * 100) / 100;
 }
 
+// --- Launch codes: per-player mazes ----------------------------------------
+// Bombardment's launchCodes phase drops every player into their own maze,
+// each carved into its own slice of the arena so up to 6 fit on screen at
+// once. Players keep using the normal movementUpdate channel (their reported
+// x/y just happens to land inside their maze's slot rect); the server checks
+// that reported point against the maze's walls every tick and kills on
+// contact, same as any other instant-death hazard.
+const MAZE_AREA = { xMin: 60, xMax: 740, yMin: 90, yMax: 560 };
+const MAZE_GAP = 16; // px between adjacent maze slots
+const MAZE_MARGIN = 12; // px inset between a slot's edge and its maze grid
+const MAZE_MIN_CELL = 50; // px; grid size is shrunk to keep cells at least this big
+const MAZE_WALL_THICKNESS = 5;
+const MAZE_HIT_RADIUS = 8; // px around a wall's centerline that's lethal to touch
+// cols/rows for up to 6 players, chosen to keep slots roughly square.
+const MAZE_GRID_LAYOUT = { 1: [1, 1], 2: [2, 1], 3: [2, 2], 4: [2, 2], 5: [3, 2], 6: [3, 2] };
+
+function mazeSlots(n) {
+  const count = Math.max(1, Math.min(6, n));
+  const [cols, rows] = MAZE_GRID_LAYOUT[count];
+  const areaW = MAZE_AREA.xMax - MAZE_AREA.xMin;
+  const areaH = MAZE_AREA.yMax - MAZE_AREA.yMin;
+  const slotW = (areaW - MAZE_GAP * (cols - 1)) / cols;
+  const slotH = (areaH - MAZE_GAP * (rows - 1)) / rows;
+  const slots = [];
+  for (let i = 0; i < count; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    slots.push({
+      x: MAZE_AREA.xMin + col * (slotW + MAZE_GAP),
+      y: MAZE_AREA.yMin + row * (slotH + MAZE_GAP),
+      w: slotW, h: slotH
+    });
+  }
+  return slots;
+}
+
+// Randomized-DFS ("recursive backtracker") perfect maze: every cell reachable
+// from every other, exactly one path between any two — no loops to make
+// dodging trivial, no isolated pockets that strand a player.
+function carveMazeCells(gridSize) {
+  const cells = [];
+  for (let y = 0; y < gridSize; y++) {
+    cells.push(Array.from({ length: gridSize }, () => ({ N: true, E: true, S: true, W: true })));
+  }
+  const visited = cells.map(row => row.map(() => false));
+  const DIRS = [[0, -1, 'N', 'S'], [1, 0, 'E', 'W'], [0, 1, 'S', 'N'], [-1, 0, 'W', 'E']];
+  const stack = [[0, 0]];
+  visited[0][0] = true;
+  while (stack.length) {
+    const [cx, cy] = stack[stack.length - 1];
+    const options = DIRS
+      .map(([dx, dy, a, b]) => [cx + dx, cy + dy, a, b])
+      .filter(([nx, ny]) => nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize && !visited[ny][nx]);
+    if (options.length === 0) { stack.pop(); continue; }
+    const [nx, ny, a, b] = options[Math.floor(Math.random() * options.length)];
+    cells[cy][cx][a] = false;
+    cells[ny][nx][b] = false;
+    visited[ny][nx] = true;
+    stack.push([nx, ny]);
+  }
+  return cells;
+}
+
+// Builds one maze fit inside `rect`: wall segments in absolute canvas
+// coordinates (ready to broadcast and to collision-check against), a start
+// cell (top-left) and an exit cell (bottom-right, diagonally furthest away).
+function generateMaze(rect, requestedGridSize) {
+  const innerW = rect.w - MAZE_MARGIN * 2;
+  const innerH = rect.h - MAZE_MARGIN * 2;
+  const maxFeasible = Math.max(4, Math.floor(Math.min(innerW, innerH) / MAZE_MIN_CELL));
+  const gridSize = Math.min(requestedGridSize, maxFeasible);
+
+  const cells = carveMazeCells(gridSize);
+  const cellSize = Math.min(innerW, innerH) / gridSize;
+  const originX = rect.x + MAZE_MARGIN + (innerW - cellSize * gridSize) / 2;
+  const originY = rect.y + MAZE_MARGIN + (innerH - cellSize * gridSize) / 2;
+
+  // Each interior wall is shared by two cells (carved together in lockstep
+  // above), so only draw it from the cell that "owns" it — N/W for every
+  // cell, plus S/E only along the maze's outer bottom/right edge — instead
+  // of emitting the same segment twice.
+  const walls = [];
+  for (let cy = 0; cy < gridSize; cy++) {
+    for (let cx = 0; cx < gridSize; cx++) {
+      const cell = cells[cy][cx];
+      const x0 = originX + cx * cellSize, y0 = originY + cy * cellSize;
+      const x1 = x0 + cellSize, y1 = y0 + cellSize;
+      if (cell.N) walls.push({ x1: x0, y1: y0, x2: x1, y2: y0 });
+      if (cell.W) walls.push({ x1: x0, y1: y0, x2: x0, y2: y1 });
+      if (cell.S && cy === gridSize - 1) walls.push({ x1: x0, y1: y1, x2: x1, y2: y1 });
+      if (cell.E && cx === gridSize - 1) walls.push({ x1: x1, y1: y0, x2: x1, y2: y1 });
+    }
+  }
+
+  return {
+    rect, cellSize, walls,
+    start: { x: originX + cellSize * 0.5, y: originY + cellSize * 0.5 },
+    exit: { x: originX + cellSize * (gridSize - 0.5), y: originY + cellSize * (gridSize - 0.5) }
+  };
+}
+
+function pointSegmentDistance(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  const t2 = lenSq > 0 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq)) : 0;
+  return Math.hypot(px - (x1 + t2 * dx), py - (y1 + t2 * dy));
+}
+
+function hitsMazeWall(maze, x, y) {
+  const threshold = MAZE_WALL_THICKNESS / 2 + MAZE_HIT_RADIUS;
+  return maze.walls.some(w => pointSegmentDistance(x, y, w.x1, w.y1, w.x2, w.y2) < threshold);
+}
+
 // deps:
-//   say(lobby, text, intensity)  speak a boss line to the lobby
-//   emit(lobby, message)         broadcast a raw message object to the lobby
-//   t(n)                         round a coordinate for the wire
-function createPhaseEngine({ say, emit, t }) {
+//   say(lobby, text, intensity)        speak a boss line to the lobby
+//   emit(lobby, message)               broadcast a raw message object to the lobby
+//   t(n)                               round a coordinate for the wire
+//   killPlayer(lobby, player, now)     kill a player outright (maze walls, timeout, ...)
+function createPhaseEngine({ say, emit, t, killPlayer }) {
   function sayOneOf(lobby, lines, intensity) {
     if (lines && lines.length) say(lobby, lines[Math.floor(Math.random() * lines.length)], intensity);
   }
@@ -170,6 +284,85 @@ function createPhaseEngine({ say, emit, t }) {
           x: t(STAR_BOUNDS.xMin + Math.random() * (STAR_BOUNDS.xMax - STAR_BOUNDS.xMin)),
           y: t(STAR_BOUNDS.yMin + Math.random() * (STAR_BOUNDS.yMax - STAR_BOUNDS.yMin))
         });
+      }
+    },
+
+    // Launch codes: one maze per player, teleported to their maze's start on
+    // entry. Every tick checks each living, not-yet-finished player's current
+    // (self-reported) position against their own maze's walls, and against
+    // their exit. If everyone clears their maze the phase advances early;
+    // if the clock runs out with anyone still inside, the whole party dies.
+    launchCodes: {
+      onEnter(lobby, def) {
+        const state = lobby.phaseState;
+        state.startedAt = Date.now();
+        state.reached = new Set();
+        state.resolved = false;
+
+        const ids = Object.keys(lobby.players).map(Number).sort((a, b) => a - b);
+        const slots = mazeSlots(ids.length);
+        state.mazes = {};
+        state.trackedIds = ids;
+        ids.forEach((id, i) => {
+          const maze = generateMaze(slots[i], def.gridSize);
+          state.mazes[id] = maze;
+          const p = lobby.players[id];
+          p.x = maze.start.x;
+          p.y = maze.start.y;
+        });
+
+        emit(lobby, {
+          type: 'mazeLayout',
+          timeLimit: def.timeLimit,
+          mazes: Object.fromEntries(ids.map(id => {
+            const m = state.mazes[id];
+            return [id, {
+              rect: m.rect,
+              cellSize: r2(m.cellSize),
+              walls: m.walls.map(w => ({ x1: t(w.x1), y1: t(w.y1), x2: t(w.x2), y2: t(w.y2) })),
+              start: { x: t(m.start.x), y: t(m.start.y) },
+              exit: { x: t(m.exit.x), y: t(m.exit.y) }
+            }];
+          }))
+        });
+      },
+      onExit(lobby) {
+        lobby.phaseState.mazes = null;
+      },
+      update(lobby, def, now) {
+        const state = lobby.phaseState;
+        if (state.resolved) return;
+
+        for (const id of state.trackedIds) {
+          const p = lobby.players[id];
+          if (!p || p.dead || state.reached.has(id)) continue;
+          const maze = state.mazes[id];
+          if (hitsMazeWall(maze, p.x, p.y)) {
+            killPlayer(lobby, p, now);
+            continue;
+          }
+          if (Math.hypot(p.x - maze.exit.x, p.y - maze.exit.y) < maze.cellSize * 0.4) {
+            state.reached.add(id);
+          }
+        }
+
+        if (state.trackedIds.every(id => state.reached.has(id))) {
+          state.resolved = true;
+          trigger(lobby, 'mazeCleared');
+          return;
+        }
+
+        const elapsed = now - state.startedAt;
+        lobby.mech = { mazeTimeLeft: Math.max(0, def.timeLimit - elapsed) };
+        if (elapsed > def.timeLimit) {
+          state.resolved = true;
+          sayOneOf(lobby, def.say && def.say.timeout, (def.say && def.say.intensity) || 0);
+          emit(lobby, { type: 'mazeTimeout' });
+          for (const id of state.trackedIds) {
+            const p = lobby.players[id];
+            if (p && !p.dead) killPlayer(lobby, p, now);
+          }
+        }
       }
     },
 

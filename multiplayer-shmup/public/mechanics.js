@@ -216,6 +216,20 @@ export const MECHANICS = {
         }
     },
 
+    // Launch codes: no client-spawned hazards — the maze layout and its
+    // wall/exit checks are entirely server-driven (see launchCodes in
+    // server/phases.js and the 'maze' handling in renderer.js), since the
+    // maze geometry has to be identical for every client's collision *and*
+    // render. Sweeps anything left over from the phase before it, same as
+    // the terminal 'none' mechanic.
+    maze: {
+        update(ctx) {
+            ctx.bossBullets.length = 0;
+            ctx.bossMissiles.length = 0;
+            ctx.bossLightning.length = 0;
+        }
+    },
+
     // Twin's sun phase: no projectiles at all — the threat is standing in an
     // active ray outside the moon's shadow. Geometry comes entirely from the
     // server's per-tick mech broadcast (ray angle, glow, moon position) so

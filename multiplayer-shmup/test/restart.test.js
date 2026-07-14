@@ -1,6 +1,6 @@
 // E2E coverage of the post-victory "fight again" flow: only the host can
 // restart, and restarting fully resets the encounter (boss HP, phase, players).
-const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
+const { check, finish, makeClient, sleep, phaseIndex, phaseHp } = require('./helpers');
 
 (async () => {
   const host = makeClient('host');
@@ -52,7 +52,8 @@ const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
   await sleep(300);
   s = host.lastState();
   check(s.phase === MAIN, `host restart resets back to the main phase (was ${s.phase})`);
-  check(s.boss.hp === s.boss.maxHp && s.boss.maxHp === 3000, `host restart resets boss to full main-phase HP (${s.boss.hp}/${s.boss.maxHp})`);
+  const blitzMainHp = phaseHp('blitz', 'main', 2);
+  check(s.boss.hp === s.boss.maxHp && s.boss.maxHp === blitzMainHp, `host restart resets boss to full main-phase HP (${s.boss.hp}/${s.boss.maxHp})`);
   check(s.players.every(p => !p.dead && p.health === 100), 'host restart brings every player back to full health');
 
   // Confirm the reset actually took (repeated damage works again since the
@@ -61,7 +62,7 @@ const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
   host.send({ type: 'bossDamage' });
   await sleep(200);
   s = host.lastState();
-  check(s.boss.hp === 2990, `boss is damageable again after restart (hp=${s.boss.hp})`);
+  check(s.boss.hp === blitzMainHp - 10, `boss is damageable again after restart (hp=${s.boss.hp})`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });

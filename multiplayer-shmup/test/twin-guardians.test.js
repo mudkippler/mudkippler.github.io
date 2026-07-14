@@ -3,7 +3,7 @@
 // moon phase (server-seeded stars) → eclipse (converge fraction ramping to
 // totality) → enrage → defeated, plus the zone damage sources ('ray',
 // 'dark', 'star') the sun/moon phases report.
-const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
+const { check, finish, makeClient, sleep, phaseIndex, phaseHp, phaseField } = require('./helpers');
 
 const ORBS = phaseIndex('twin', 'orbs');
 const SUN = phaseIndex('twin', 'sun');
@@ -50,14 +50,18 @@ async function depleteUntil(clients, predicate, maxMs = 45000) {
     `orbs are a sun/moon pair (kinds: ${JSON.stringify(kinds)})`);
 
   // --- Kill both orbs together → sun phase ---
+  // Hit count derived from orbHp (rather than a fixed guess) so it stays
+  // correct whether FAST_TESTS is scaling that pool down or not.
+  const orbHits = Math.ceil(phaseHp('twin', 'orbs', 1, 'orbHp') / 10) + 2;
   await Promise.all([
-    (async () => { for (let i = 0; i < 35; i++) { host.send({ type: 'orbDamage', orbId: 0 }); await sleep(55); } })(),
-    (async () => { for (let i = 0; i < 35; i++) { friend.send({ type: 'orbDamage', orbId: 1 }); await sleep(55); } })()
+    (async () => { for (let i = 0; i < orbHits; i++) { host.send({ type: 'orbDamage', orbId: 0 }); await sleep(55); } })(),
+    (async () => { for (let i = 0; i < orbHits; i++) { friend.send({ type: 'orbDamage', orbId: 1 }); await sleep(55); } })()
   ]);
   await sleep(300);
   let s = host.lastState();
   check(s.phase === SUN, `clearing the orbs together enters the sun phase (was ${s.phase})`);
-  check(s.boss.maxHp === 1600, `sun phase HP pool scaled for 2 players (800x2=1600, got ${s.boss.maxHp})`);
+  const twinSunHp = phaseHp('twin', 'sun', 2);
+  check(s.boss.maxHp === twinSunHp, `sun phase HP pool scaled for 2 players (got ${s.boss.maxHp}, expected ${twinSunHp})`);
 
   // --- Sun phase mech broadcast: rotating rays, pulsing glow, orbiting moon ---
   await sleep(300);
@@ -102,9 +106,10 @@ async function depleteUntil(clients, predicate, maxMs = 45000) {
   await depleteUntil([host, friend], s => s.phase === ECLIPSE);
   s = host.lastState();
   check(s.phase === ECLIPSE, `moon depletion enters the eclipse (was ${s.phase})`);
-  check(s.boss.maxHp === 1400, `eclipse HP pool scaled for 2 players (700x2=1400, got ${s.boss.maxHp})`);
+  const twinEclipseHp = phaseHp('twin', 'eclipse', 2);
+  check(s.boss.maxHp === twinEclipseHp, `eclipse HP pool scaled for 2 players (got ${s.boss.maxHp}, expected ${twinEclipseHp})`);
   check(s.mech && s.mech.moonT >= 0 && s.mech.moonT <= 1, `eclipse broadcasts the converge fraction (${s.mech && s.mech.moonT})`);
-  await sleep(3000); // convergeMs is 2600
+  await sleep(phaseField('twin', 'eclipse', 'convergeMs') + 400); // pad past the converge duration
   check(host.lastState().mech.moonT === 1, `totality reached after the converge duration (moonT=${host.lastState().mech.moonT})`);
 
   // --- Eclipse → enrage → defeated: the fight still ends like every other ---

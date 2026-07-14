@@ -2,7 +2,7 @@
 // depleting the main boss HP (no-orb encounters) or by clearing both twin
 // orbs together, it gives the boss a fresh HP pool, makes it roam the arena,
 // and has it periodically fire shots aimed at each living player's position.
-const { check, finish, makeClient, sleep, kill, phaseIndex } = require('./helpers');
+const { check, finish, makeClient, sleep, kill, phaseIndex, phaseHp } = require('./helpers');
 
 async function damageBossUntil(client, predicate, maxHits = 220) {
   for (let i = 0; i < maxHits; i++) {
@@ -29,7 +29,8 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
   const BLITZ_ENRAGE = phaseIndex('blitz', 'enrage');
   const chaseState = await damageBossUntil(host, s => s.phase === BLITZ_ENRAGE);
   check(chaseState.phase === BLITZ_ENRAGE, `depleting main boss HP enters the enrage chase (phase was ${chaseState.phase})`);
-  check(chaseState.boss.maxHp === 300, `chase phase uses blitz's enrage HP pool (300), got ${chaseState.boss.maxHp}`);
+  const blitzEnrageHp = phaseHp('blitz', 'enrage', 1);
+  check(chaseState.boss.maxHp === blitzEnrageHp, `chase phase uses blitz's enrage HP pool (${blitzEnrageHp}), got ${chaseState.boss.maxHp}`);
   // Allow a little slack: the test's damage cadence can land another hit or
   // two before the client observes the enrage transition broadcast, same as
   // it would for any player attacking continuously through the transition.
@@ -93,19 +94,22 @@ async function damageBossUntil(client, predicate, maxHits = 220) {
   await damageBossUntil(twinHost, s => s.phase === TWIN_ORBS, 550);
   check(twinHost.lastState().phase === TWIN_ORBS, 'twin boss depletion enters the orb phase as before');
 
-  // Killing one orb takes ~1.5s at one player's max reported DPS, and the
-  // kill-together window is only 3s — a single player can't clear both
-  // sequentially (by design, see server.js), so use two players hitting
-  // different orbs concurrently.
+  // The kill-together window is only 3s — a single player can't clear both
+  // orbs sequentially (by design, see server.js), so use two players hitting
+  // different orbs concurrently. Hit count is derived from orbHp (rather than
+  // a fixed guess) so it stays correct whether FAST_TESTS is scaling that
+  // pool down or not.
+  const orbHits = Math.ceil(phaseHp('twin', 'orbs', 1, 'orbHp') / 10) + 2;
   await Promise.all([
-    (async () => { for (let i = 0; i < 30; i++) { twinHost.send({ type: 'orbDamage', orbId: 0 }); await sleep(55); } })(),
-    (async () => { for (let i = 0; i < 30; i++) { twinFriend.send({ type: 'orbDamage', orbId: 1 }); await sleep(55); } })()
+    (async () => { for (let i = 0; i < orbHits; i++) { twinHost.send({ type: 'orbDamage', orbId: 0 }); await sleep(55); } })(),
+    (async () => { for (let i = 0; i < orbHits; i++) { twinFriend.send({ type: 'orbDamage', orbId: 1 }); await sleep(55); } })()
   ]);
   await sleep(300);
   const twinSunState = twinHost.lastState();
   check(twinSunState.phase === phaseIndex('twin', 'sun'), `clearing both twin orbs together enters the sun phase (phase was ${twinSunState.phase})`);
   // Two players in this lobby: boss HP scales linearly with headcount.
-  check(twinSunState.boss.maxHp === 1600, `twin's sun phase uses its own HP pool (800 x2 players=1600), got ${twinSunState.boss.maxHp}`);
+  const twinSunHp = phaseHp('twin', 'sun', 2);
+  check(twinSunState.boss.maxHp === twinSunHp, `twin's sun phase uses its own HP pool (x2 players=${twinSunHp}), got ${twinSunState.boss.maxHp}`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });

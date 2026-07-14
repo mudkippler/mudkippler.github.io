@@ -3,6 +3,11 @@
 // protocol against a live server instance — no mocking of game logic.
 const WebSocket = require('ws');
 const msgpack = require('@ygoe/msgpack');
+// Default to the scaled-down fight HP/timers (see encounters.js) even when a
+// suite is run directly (node test/foo.test.js) instead of through run.js,
+// which sets this explicitly for the server subprocess too. Must be set
+// before requiring encounters.js, which reads it at module load.
+if (process.env.FAST_TESTS === undefined) process.env.FAST_TESTS = '1';
 const { ENCOUNTERS } = require('../server/encounters');
 
 const PORT = process.env.TEST_PORT || 3100;
@@ -76,6 +81,25 @@ function phaseIndex(encounterId, phaseId) {
   return index;
 }
 
+// A phase's boss/orb HP pool scales linearly with headcount (see
+// playerCount in server/phases.js) on top of whatever FAST_TESTS scaling
+// encounters.js already applied — reading it from ENCOUNTERS instead of
+// hardcoding the expected number keeps assertions correct under either mode.
+function phaseHp(encounterId, phaseId, playerCount, field = 'bossHp') {
+  const phase = ENCOUNTERS[encounterId].phases.find(p => p.id === phaseId);
+  if (!phase || phase[field] == null) throw new Error(`encounter ${encounterId} phase '${phaseId}' has no ${field}`);
+  return phase[field] * playerCount;
+}
+
+// Non-HP phase knobs (e.g. convergeMs) that FAST_TESTS may also scale, but
+// which don't scale with headcount the way bossHp/orbHp do — read the raw
+// value instead of hardcoding it so timing-based sleeps stay correct either way.
+function phaseField(encounterId, phaseId, field) {
+  const phase = ENCOUNTERS[encounterId].phases.find(p => p.id === phaseId);
+  if (!phase || phase[field] == null) throw new Error(`encounter ${encounterId} phase '${phaseId}' has no ${field}`);
+  return phase[field];
+}
+
 // Kill a player by reporting playerDamage 10 times (100 HP / 10 dmg), spaced
 // past the server's 50ms anti-spam window.
 async function kill(client) {
@@ -110,4 +134,4 @@ async function standOn(mover, targetId, until, timeout = 20000) {
   return false;
 }
 
-module.exports = { check, finish, makeClient, sleep, kill, standOn, phaseIndex };
+module.exports = { check, finish, makeClient, sleep, kill, standOn, phaseIndex, phaseHp, phaseField, ENCOUNTERS };
