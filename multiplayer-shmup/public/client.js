@@ -964,7 +964,8 @@ function gameLoop() {
     // the damage checks use.
     const mechView = { mechanic: phaseDef().mechanic, mech, stars: bossStars, params: phaseDef().params || {}, state: mechState, maze: mazeLayout };
 
-    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive(), mechView);
+    draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive(), mechView,
+        encounter.id, bossPortraitState(phaseDef(), boss.hp, boss.maxHp));
     updateHUD(myId, Object.values(players));
     updateLeaderboard(myId, fullDamageLog);
     updateBossBar(encounter, boss, phaseDef(), inGame);

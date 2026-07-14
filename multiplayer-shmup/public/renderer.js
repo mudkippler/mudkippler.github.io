@@ -4,6 +4,26 @@ import { starLightRadius } from './mechanics.js';
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
+// Boss body sprites: drop img/<encounterId>[_<state>]_sprite.png into public/img
+// (same state names as the portrait convention in bossportrait.js — 'sun',
+// 'moon', 'eclipse', ...) and it's drawn in place of the plain circle body.
+// A missing file just falls back to the circle instead of a broken image.
+const bossSpriteCache = {};
+function bossSpriteFor(encounterId, state) {
+    if (!encounterId) return null;
+    const src = `img/${encounterId}${state && state !== 'base' ? `_${state}` : ''}_sprite.png`;
+    let entry = bossSpriteCache[src];
+    if (!entry) {
+        const img = new Image();
+        entry = { img, ready: false, failed: false };
+        img.onload = () => { entry.ready = true; };
+        img.onerror = () => { entry.failed = true; };
+        img.src = src;
+        bossSpriteCache[src] = entry;
+    }
+    return entry.ready ? entry.img : null;
+}
+
 // Small tombstone icon marking a resurrectable (currently-dead) player.
 function drawGravestone(x, y, color) {
     const w = 16, h = 18;
@@ -492,7 +512,7 @@ function drawLightning(bolts) {
 
 let lastDrawTime = performance.now();
 
-export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef, stormUmbrellaActive, mechView) {
+export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef, stormUmbrellaActive, mechView, encounterId, bossState) {
     // Reset any transform left over from a previous shaking frame before
     // clearing, so the clear always covers the full physical canvas.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -521,12 +541,20 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
 
-    // Boss — phases can tint the body (e.g. red during the enrage chase as a
-    // readable signal that it's now mobile and firing aimed shots).
-    ctx.fillStyle = (phaseDef && phaseDef.bossTint) || 'gray';
-    ctx.beginPath();
-    ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
-    ctx.fill();
+    // Boss — a sprite (see bossSpriteFor) is drawn if one exists for this
+    // encounter/state, otherwise it falls back to a plain circle tinted by
+    // the phase (e.g. red during the enrage chase, as a readable signal that
+    // it's now mobile and firing aimed shots).
+    const bossSprite = bossSpriteFor(encounterId, bossState);
+    if (bossSprite) {
+        const size = boss.radius * 2;
+        ctx.drawImage(bossSprite, boss.x - boss.radius, boss.y - boss.radius, size, size);
+    } else {
+        ctx.fillStyle = (phaseDef && phaseDef.bossTint) || 'gray';
+        ctx.beginPath();
+        ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
 
     // Boss health bar
     if (boss.maxHp) {
