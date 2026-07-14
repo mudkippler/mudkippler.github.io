@@ -5,7 +5,7 @@ import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js
 import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
 import { MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE, isBlockedByStormUmbrella } from './attacks.js';
-import { MECHANICS } from './mechanics.js';
+import { MECHANICS, activeMechanics } from './mechanics.js';
 
 const INTERPOLATION_DELAY = 50; // milliseconds
 
@@ -96,11 +96,18 @@ let bossLightning = []; // local storm lightning telegraphs/strikes — timed ha
 let bulletIdCounter = 0;
 let lastShot = 0;
 
-// Scratch state for the active boss mechanic (attack cadence, ring rotation,
-// bombardment's difficulty ratchet — see mechanics.js). Deliberately kept
-// across phase transitions so timers/ratchets carry from the main fight into
-// the enrage chase; reset when the encounter changes or resets.
+// Scratch state for the active boss mechanics (attack cadence, ring rotation,
+// bombardment's difficulty ratchet — see mechanics.js). Each mechanic's
+// scratch lives under its own name so simultaneous mechanics don't trample
+// each other's timers; cross-mechanic keys (the zone damage tick immunity)
+// sit at the root as the `shared` scratch. Deliberately kept across phase
+// transitions so timers/ratchets carry from the main fight into the enrage
+// chase; reset when the encounter changes or resets.
 let mechState = {};
+
+function mechScratch(name) {
+    return mechState[name] || (mechState[name] = {});
+}
 
 // Storm's current wind push, in px/sec — server-authoritative (see the
 // 'state' handler) so every client's local prediction agrees on the same
@@ -117,6 +124,11 @@ let mech = null;
 // local arrival time; the starfield mechanic drives their twinkle →
 // explosion → light-pool lifecycle from that timestamp.
 let bossStars = [];
+
+// Solar flares seeded by the server during twin's sun phase — same idea as
+// stars: the wedge geometry (angle/width/spin) rides in the event so every
+// client agrees on it, the telegraph → burn timeline runs off local arrival.
+let bossFlares = [];
 
 // Bombardment's launchCodes phase: one maze per player, broadcast once on
 // phase entry (see the 'mazeLayout' handler below) rather than per-tick like
@@ -367,6 +379,7 @@ function connect() {
             bossMissiles = [];
             bossLightning = [];
             bossStars = [];
+            bossFlares = [];
             mazeLayout = null;
             mechState = {};
             setBossPortrait(encounter.id, 'base');
@@ -414,8 +427,11 @@ function connect() {
             wind = data.wind || { x: 0, y: 0, umbrella: true };
             mech = data.mech || null;
             const newPhaseIndex = data.phase || 0;
-            // Leftover stars don't outlive the phase that seeded them.
-            if (newPhaseIndex !== phaseIndex) bossStars = [];
+            // Leftover stars/flares don't outlive the phase that seeded them.
+            if (newPhaseIndex !== phaseIndex) {
+                bossStars = [];
+                bossFlares = [];
+            }
             // Host restarted after victory: the server teleported everyone
             // back to spawn, so drop our prediction and re-snap to it.
             if (phaseDef().victory && newPhaseIndex === 0) myPos = null;
@@ -518,6 +534,14 @@ function connect() {
             // server/phases.js): every player's maze walls/start/exit,
             // fixed for the whole phase.
             mazeLayout = { timeLimit: data.timeLimit, mazes: data.mazes };
+            return;
+        }
+
+        if (data.type === 'flare') {
+            // A solar flare seeded by the server (twin's sun phase): its
+            // telegraph → burn timeline runs off this local timestamp, same
+            // as a star's twinkle → explosion.
+            bossFlares.push({ ang: data.ang, w: data.w, len: data.len, spin: data.spin, spawn: performance.now() });
             return;
         }
 
@@ -766,19 +790,25 @@ function updateLocalCombat(now, myPos, alive) {
     // fight's mechanic, just firing from wherever the roaming boss currently
     // is, with the server separately relaying aimed shots via 'bossAimedShot'.
     const def = phaseDef();
-    const mechanic = MECHANICS[def.mechanic] || MECHANICS.ring;
-    // boss.x is only undefined before the first join payload lands; hold off
-    // spawning until then ('none' runs regardless since it only clears).
-    if (boss.x !== undefined || def.mechanic === 'none') {
+    // A phase may run several mechanics simultaneously (see activeMechanics
+    // in mechanics.js) — each gets its own scratch keyed by name, plus the
+    // shared root scratch for cross-mechanic state like the zone damage tick.
+    for (const entry of activeMechanics(def)) {
+        const mechanic = MECHANICS[entry.mechanic] || MECHANICS.ring;
+        // boss.x is only undefined before the first join payload lands; hold
+        // off spawning until then ('none' runs regardless since it only clears).
+        if (boss.x === undefined && entry.mechanic !== 'none') continue;
         mechanic.update({
             now,
-            state: mechState,
-            params: def.params || {},
+            state: mechScratch(entry.mechanic),
+            shared: mechState,
+            params: entry.params || {},
             boss,
             orbs,
             wind,
             mech,
             stars: bossStars,
+            flares: bossFlares,
             myPos,
             alive,
             send,
@@ -959,10 +989,20 @@ function gameLoop() {
         updateAllyBullets();
     }
 
-    // Everything the renderer needs to draw the active mechanic's zones and
-    // effects (sun rays, darkness, stars, the eclipse) from the same values
-    // the damage checks use.
-    const mechView = { mechanic: phaseDef().mechanic, mech, stars: bossStars, params: phaseDef().params || {}, state: mechState, maze: mazeLayout };
+    // Everything the renderer needs to draw the active mechanics' zones and
+    // effects (sun rays, flares, darkness, stars, the eclipse) from the same
+    // values the damage checks use — one entry per simultaneous mechanic.
+    const mechView = {
+        mechanics: activeMechanics(phaseDef()).map(m => ({
+            name: m.mechanic,
+            params: m.params || {},
+            state: mechScratch(m.mechanic)
+        })),
+        mech,
+        stars: bossStars,
+        flares: bossFlares,
+        maze: mazeLayout
+    };
 
     draw(myId, interpolatedPlayers, bullets, allyBullets, bossBullets, bossMissiles, bossLightning, boss, damagePopups, graves, orbs, phaseDef(), stormUmbrellaActive(), mechView,
         encounter.id, bossPortraitState(phaseDef(), boss.hp, boss.maxHp));

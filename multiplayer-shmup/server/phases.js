@@ -247,6 +247,7 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
     sunDominant: {
       onEnter(lobby) {
         lobby.phaseState.startedAt = Date.now();
+        lobby.phaseState.nextFlare = Date.now() + 1500; // a beat of calm before the first flare
       },
       onExit(lobby) {
         lobby.mech = null;
@@ -264,6 +265,21 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
             y: t(lobby.boss.y + Math.sin(moonAngle) * def.orbitRadius)
           }
         };
+
+        // Solar flares: seeded here (like moonDominant's stars) so every
+        // client sees the same wedge — the angle, width, reach, and spin all
+        // roll server-side; the telegraph/burn timing runs client-side from
+        // the event's arrival (see the solarFlares mechanic in mechanics.js).
+        if (def.flareInterval && now >= lobby.phaseState.nextFlare) {
+          lobby.phaseState.nextFlare = now + def.flareInterval;
+          emit(lobby, {
+            type: 'flare',
+            ang: r2(Math.random() * Math.PI * 2),
+            w: r2(def.flareWidthMin + Math.random() * (def.flareWidthMax - def.flareWidthMin)),
+            len: t(def.flareLengthMin + Math.random() * (def.flareLengthMax - def.flareLengthMin)),
+            spin: r2((Math.random() < 0.5 ? -1 : 1) * def.flareSpin * (0.7 + Math.random() * 0.6))
+          });
+        }
       }
     },
 

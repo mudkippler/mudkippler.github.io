@@ -1,5 +1,5 @@
 import { MISSILE_EXPLOSION_DURATION, LIGHTNING_WARNING_MS, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, STORM_UMBRELLA_X, STORM_UMBRELLA_Y, STORM_UMBRELLA_HALF_WIDTH } from './attacks.js';
-import { starLightRadius } from './mechanics.js';
+import { starLightRadius, flareAngle } from './mechanics.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -151,8 +151,9 @@ const RAY_LENGTH = 950; // px, past every corner of the 800x600 arena
 
 // Sun phase (under layer): the rotating ray wedges, the moon satellite, and
 // its shadow — a dark annular sector cast away from the sun.
-function drawSunPhase(view, boss) {
-    const { mech, params } = view;
+function drawSunPhase(view, entry, boss) {
+    const { mech } = view;
+    const params = entry.params;
     if (!mech) return;
 
     const active = mech.glow >= params.rayActiveGlow;
@@ -168,6 +169,28 @@ function drawSunPhase(view, boss) {
         ctx.fill();
     }
     ctx.globalAlpha = 1;
+
+    // Glowing bloom along the borders of active rays, so the exact edge of
+    // "standing here burns" reads at a glance.
+    if (active) {
+        ctx.save();
+        ctx.globalAlpha = 0.3 + 0.4 * mech.glow;
+        ctx.strokeStyle = '#ffdf80';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#ffb43c';
+        ctx.shadowBlur = 14;
+        for (let i = 0; i < params.rayCount; i++) {
+            const center = mech.ray + i * (Math.PI * 2 / params.rayCount);
+            for (const side of [-1, 1]) {
+                const edge = center + side * params.rayWidth / 2;
+                ctx.beginPath();
+                ctx.moveTo(boss.x, boss.y);
+                ctx.lineTo(boss.x + Math.cos(edge) * RAY_LENGTH, boss.y + Math.sin(edge) * RAY_LENGTH);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
 
     // Corona ring so the boss reads as the sun itself.
     ctx.globalAlpha = 0.35 + 0.4 * mech.glow;
@@ -204,17 +227,96 @@ function drawSunPhase(view, boss) {
     }
 }
 
+// Solar flares (under layer, drawn after the sun's rays and the moon's
+// shadow so it's visibly true that the shadow does NOT shelter from them):
+// close-range sparks off the sun's surface, not arena-spanning rays. Each
+// server-seeded flare telegraphs as a dashed wedge outline filling in as
+// ignition nears, then burns as a flowing tongue of flame — hottest at the
+// boss, wavering at its tip — out to its rolled reach (flare.len).
+function drawSolarFlares(view, entry, boss) {
+    const now = performance.now();
+    const p = entry.params;
+    for (const flare of view.flares) {
+        const age = now - flare.spawn;
+        if (age > p.telegraphMs + p.activeMs) continue;
+        const center = flareAngle(flare, now);
+        const a0 = center - flare.w / 2;
+        const a1 = center + flare.w / 2;
+
+        if (age < p.telegraphMs) {
+            // Telegraph: the danger wedge outlined in dashes and faintly
+            // filled, both intensifying as the flare is about to ignite.
+            const dangerFrac = age / p.telegraphMs;
+            ctx.globalAlpha = 0.06 + 0.1 * dangerFrac;
+            ctx.fillStyle = '#ff7733';
+            ctx.beginPath();
+            ctx.moveTo(boss.x, boss.y);
+            ctx.arc(boss.x, boss.y, flare.len, a0, a1);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.globalAlpha = 0.35 + 0.4 * dangerFrac;
+            ctx.strokeStyle = '#ff7733';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([8, 6]);
+            ctx.beginPath();
+            ctx.moveTo(boss.x, boss.y);
+            ctx.arc(boss.x, boss.y, flare.len, a0, a1);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.lineWidth = 1;
+        } else {
+            // Burning: a flame tongue — its sides bulge slightly outside the
+            // danger wedge (visual reads a touch bigger than the hitbox,
+            // never smaller) and converge on a tip that sways and stretches,
+            // flickering the whole time and dying down at the very end.
+            const burnLeft = 1 - (age - p.telegraphMs) / p.activeMs;
+            const flicker = 0.8 + 0.2 * Math.sin(now / 45 + flare.ang * 7);
+            const tipAng = center + flare.w * 0.2 * Math.sin(now / 150 + flare.ang * 3);
+            const tipR = flare.len * (0.98 + 0.09 * Math.sin(now / 110 + flare.ang * 5));
+            const bulge = flare.w * 0.25;
+
+            const g = ctx.createRadialGradient(boss.x, boss.y, boss.radius * 0.4, boss.x, boss.y, flare.len);
+            g.addColorStop(0, 'rgba(255, 224, 130, 0.95)');
+            g.addColorStop(0.45, 'rgba(255, 120, 40, 0.6)');
+            g.addColorStop(1, 'rgba(255, 60, 20, 0.08)');
+
+            ctx.save();
+            ctx.globalAlpha = (0.45 + 0.4 * Math.min(1, burnLeft * 3)) * flicker;
+            ctx.fillStyle = g;
+            ctx.shadowColor = '#ff5522';
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.moveTo(boss.x + Math.cos(a0) * 8, boss.y + Math.sin(a0) * 8);
+            ctx.quadraticCurveTo(
+                boss.x + Math.cos(a0 - bulge) * flare.len * 0.6, boss.y + Math.sin(a0 - bulge) * flare.len * 0.6,
+                boss.x + Math.cos(tipAng) * tipR, boss.y + Math.sin(tipAng) * tipR
+            );
+            ctx.quadraticCurveTo(
+                boss.x + Math.cos(a1 + bulge) * flare.len * 0.6, boss.y + Math.sin(a1 + bulge) * flare.len * 0.6,
+                boss.x + Math.cos(a1) * 8, boss.y + Math.sin(a1) * 8
+            );
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+    ctx.globalAlpha = 1;
+}
+
 // Moon phase (over layer): pitch-black darkness with even-odd holes punched
 // out for every light source, then the stars' twinkles, explosions, and
 // light-pool rims drawn on top so they stay visible in the dark.
-function drawMoonPhase(view, boss) {
-    const { stars, params } = view;
+function drawMoonPhase(view, entry, boss) {
+    const { stars } = view;
+    const params = entry.params;
     const now = performance.now();
 
+    // The darkness, with holes punched only where starlight pools — the
+    // moon/boss itself casts no safe glow.
     ctx.beginPath();
     ctx.rect(0, 0, canvas.width, canvas.height);
-    ctx.moveTo(boss.x + params.moonGlowRadius, boss.y);
-    ctx.arc(boss.x, boss.y, params.moonGlowRadius, 0, Math.PI * 2);
     for (const star of stars) {
         const r = starLightRadius(star, now, params);
         if (r > 0) {
@@ -225,13 +327,21 @@ function drawMoonPhase(view, boss) {
     ctx.fillStyle = 'rgba(4, 6, 16, 0.82)';
     ctx.fill('evenodd');
 
-    // Moonlight rim around the boss's own glow.
-    ctx.globalAlpha = 0.4;
-    ctx.strokeStyle = '#cdd6e8';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(boss.x, boss.y, params.moonGlowRadius, 0, Math.PI * 2);
-    ctx.stroke();
+    // Spotlight glow inside every pool of starlight, brightest at its
+    // center, so safe ground reads as *lit* rather than merely not-dark.
+    for (const star of stars) {
+        const r = starLightRadius(star, now, params);
+        if (r > 0) {
+            const g = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, r);
+            g.addColorStop(0, 'rgba(255, 250, 215, 0.2)');
+            g.addColorStop(0.65, 'rgba(255, 250, 215, 0.07)');
+            g.addColorStop(1, 'rgba(255, 250, 215, 0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
 
     for (const star of stars) {
         const age = now - star.spawn;
@@ -276,14 +386,15 @@ function drawMoonPhase(view, boss) {
     ctx.globalAlpha = 1;
 }
 
-// Eclipse (over layer): the corona blazing behind, the moon disc sliding
-// over the sun as mech.moonT ramps 0..1, and the totality blind flash.
+// Eclipse (over layer): the corona blazing behind, the sun disc, the moon
+// disc sliding over it as mech.moonT ramps 0..1, the boss riding on top of
+// the stacked discs once totality hits, and the recurring blind flash.
 const ECLIPSE_MOON_START = { x: 170, y: -120 }; // where the disc slides in from, relative to the boss
 
-function drawEclipse(view, boss) {
-    const { mech, params, state } = view;
+function drawEclipse(view, entry, boss, encounterId, bossState) {
+    const { params, state } = entry;
     const now = performance.now();
-    const moonT = mech ? mech.moonT : 1;
+    const moonT = view.mech ? view.mech.moonT : 1;
 
     ctx.globalAlpha = 0.7;
     ctx.strokeStyle = '#ffd24d';
@@ -293,6 +404,12 @@ function drawEclipse(view, boss) {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
+    // The sun disc the moon is about to swallow.
+    ctx.fillStyle = '#ffcc44';
+    ctx.beginPath();
+    ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.fillStyle = '#10121c';
     ctx.strokeStyle = '#5a6480';
     ctx.lineWidth = 1.5;
@@ -301,9 +418,19 @@ function drawEclipse(view, boss) {
     ctx.fill();
     ctx.stroke();
 
+    // Once totality hits, the boss itself rides on top of the stacked sun
+    // and moon discs instead of being swallowed by them.
+    if (moonT >= 1) {
+        const sprite = bossSpriteFor(encounterId, bossState);
+        if (sprite) {
+            ctx.drawImage(sprite, boss.x - boss.radius, boss.y - boss.radius, boss.radius * 2, boss.radius * 2);
+        }
+    }
+
     // Totality blinds: a full white-out fading back over blindMs. The
-    // timestamp is stamped by the eclipse mechanic the moment moonT hits 1,
-    // so the flash and the firing pause share one clock.
+    // timestamp is stamped (and periodically re-stamped — totality keeps
+    // flashing every blindIntervalMs) by the eclipse mechanic, so the flash
+    // and the firing pause share one clock.
     if (state.blindStart) {
         const p = (now - state.blindStart) / params.blindMs;
         if (p < 1) {
@@ -361,15 +488,24 @@ function drawMazes(view, myId) {
     }
 }
 
+// A phase can run several mechanics at once (view.mechanics, in encounter
+// order) — each draws its own layer, so e.g. solar flares paint over the
+// moon shadow they burn through.
 function drawMechanicUnder(view, boss, myId) {
-    if (view && view.mechanic === 'sunRays') drawSunPhase(view, boss);
-    else if (view && view.mechanic === 'maze') drawMazes(view, myId);
+    if (!view) return;
+    for (const entry of view.mechanics) {
+        if (entry.name === 'sunRays') drawSunPhase(view, entry, boss);
+        else if (entry.name === 'solarFlares') drawSolarFlares(view, entry, boss);
+        else if (entry.name === 'maze') drawMazes(view, myId);
+    }
 }
 
-function drawMechanicOver(view, boss) {
+function drawMechanicOver(view, boss, encounterId, bossState) {
     if (!view) return;
-    if (view.mechanic === 'starfield') drawMoonPhase(view, boss);
-    else if (view.mechanic === 'eclipse') drawEclipse(view, boss);
+    for (const entry of view.mechanics) {
+        if (entry.name === 'starfield') drawMoonPhase(view, entry, boss);
+        else if (entry.name === 'eclipse') drawEclipse(view, entry, boss, encounterId, bossState);
+    }
 }
 
 // Bombardment hazards: the boss visibly fires a rocket that arcs offscreen,
@@ -674,15 +810,18 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     }
     ctx.globalAlpha = 1;
 
-    // Boss Bullets — one color/size per attack type so patterns read distinctly
+    // Boss Bullets — one color/size per attack type so patterns read
+    // distinctly. Types with a `trail` color get a pointy speed trail behind
+    // every bullet of that type (the value is the trail's fully-faded end
+    // color, i.e. the bullet color at alpha 0, so the gradient fades cleanly).
     const BULLET_STYLES = {
-        1: { color: 'cyan', size: 6 },        // circular ring
-        2: { color: 'red', size: 20 },        // big red ball
-        3: { color: 'orange', size: 8 },      // enrage-chase aimed shots
-        4: { color: 'magenta', size: 5 },     // spiral arms
-        5: { color: 'gold', size: 5 },        // sweeping wave fan
-        6: { color: 'greenyellow', size: 5 }, // acid rain droplets
-        8: { color: '#e8d5ff', size: 6 }      // eclipse corona rings
+        1: { color: 'cyan', size: 6, trail: 'rgba(0, 255, 255, 0)' },      // circular ring
+        2: { color: 'red', size: 20 },                                     // big red ball
+        3: { color: 'orange', size: 8, trail: 'rgba(255, 165, 0, 0)' },    // enrage-chase aimed shots
+        4: { color: 'magenta', size: 5 },                                  // spiral arms
+        5: { color: 'gold', size: 5 },                                     // sweeping wave fan
+        6: { color: 'greenyellow', size: 5 },                              // acid rain droplets
+        8: { color: '#e8d5ff', size: 6, trail: 'rgba(232, 213, 255, 0)' }  // eclipse corona arcs
     };
     for (const b of bossBullets) {
         if (b.type === 7) {
@@ -700,6 +839,31 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
             continue;
         }
         const style = BULLET_STYLES[b.type] || { color: 'white', size: b.size || 5 };
+        // Pointy speed trail: a filled triangle whose sides leave the
+        // bullet's circle tangentially and converge to a tip behind it,
+        // fading to transparent along the way. Drawn under the bullet body.
+        if (style.trail) {
+            const speed = Math.hypot(b.dx, b.dy) || 1;
+            const len = style.size * 2 + speed * 7; // tip distance behind the center
+            const backAng = Math.atan2(-b.dy, -b.dx);
+            const tipX = b.x + Math.cos(backAng) * len;
+            const tipY = b.y + Math.sin(backAng) * len;
+            // Where a line from the tip just grazes the circle: rotated
+            // acos(r/len) away from straight-back, one per side.
+            const graze = Math.acos(Math.min(1, style.size / len));
+            const g = ctx.createLinearGradient(b.x, b.y, tipX, tipY);
+            g.addColorStop(0, style.color);
+            g.addColorStop(1, style.trail);
+            ctx.globalAlpha = 0.4;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(tipX, tipY);
+            ctx.lineTo(b.x + Math.cos(backAng + graze) * style.size, b.y + Math.sin(backAng + graze) * style.size);
+            ctx.lineTo(b.x + Math.cos(backAng - graze) * style.size, b.y + Math.sin(backAng - graze) * style.size);
+            ctx.closePath();
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
         ctx.fillStyle = style.color;
         ctx.beginPath();
         ctx.arc(b.x, b.y, style.size, 0, Math.PI * 2);
@@ -710,9 +874,9 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     if (bossLightning) drawLightning(bossLightning);
 
     // Scene-covering mechanic effects (the moon phase's darkness, the
-    // eclipse disc and blind flash) — over the entities they dim, but under
+    // eclipse discs and blind flash) — over the entities they dim, but under
     // the damage popups so those stay readable.
-    drawMechanicOver(mechView, boss);
+    drawMechanicOver(mechView, boss, encounterId, bossState);
 
     // A lightning strike briefly brightens the whole scene.
     const nowFlash = performance.now();

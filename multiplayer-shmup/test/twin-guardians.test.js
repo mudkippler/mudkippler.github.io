@@ -1,8 +1,9 @@
 // E2E coverage of the reworked Twin Guardian fight: main → orbs (now a sun
-// and moon pair) → sun phase (server-broadcast ray/glow/moon mech values) →
-// moon phase (server-seeded stars) → eclipse (converge fraction ramping to
-// totality) → enrage → defeated, plus the zone damage sources ('ray',
-// 'dark', 'star') the sun/moon phases report.
+// and moon pair) → sun phase (server-broadcast ray/glow/moon mech values,
+// plus server-seeded solar flares running as a second simultaneous
+// mechanic) → moon phase (server-seeded stars) → eclipse (converge fraction
+// ramping to totality) → enrage → defeated, plus the zone damage sources
+// ('ray', 'flare', 'dark', 'star') the sun/moon phases report.
 const { check, finish, makeClient, sleep, phaseIndex, phaseHp, phaseField } = require('./helpers');
 
 const ORBS = phaseIndex('twin', 'orbs');
@@ -79,16 +80,34 @@ async function depleteUntil(clients, predicate, maxMs = 45000) {
   check(sampleA.moon.x !== sampleB.moon.x || sampleA.moon.y !== sampleB.moon.y,
     'the moon satellite actually moves along its orbit');
 
+  // --- Solar flares: the sun phase's second simultaneous mechanic ---
+  // Each is server-seeded like the moon phase's stars; the width/spin ranges
+  // come from the phase def's flare knobs.
+  const flare = await host.waitForNext('flare', 8000);
+  check(typeof flare.ang === 'number' && typeof flare.spin === 'number',
+    `sun phase seeds solar flares with an angle and spin (${JSON.stringify(flare)})`);
+  const wMin = phaseField('twin', 'sun', 'flareWidthMin');
+  const wMax = phaseField('twin', 'sun', 'flareWidthMax');
+  check(flare.w >= wMin && flare.w <= wMax,
+    `flare width rolls within its configured range [${wMin}, ${wMax}] (got ${flare.w})`);
+  const lenMin = phaseField('twin', 'sun', 'flareLengthMin');
+  const lenMax = phaseField('twin', 'sun', 'flareLengthMax');
+  check(flare.len >= lenMin && flare.len <= lenMax,
+    `flare reach rolls within its configured range [${lenMin}, ${lenMax}] (got ${flare.len})`);
+
   // --- Zone damage sources land with their server-defined amounts ---
   friend.send({ type: 'playerDamage', source: 'ray' });
   await sleep(250);
   check(friend.me().health === 88, `'ray' zone tick costs 12 HP (health ${friend.me().health})`);
   friend.send({ type: 'playerDamage', source: 'dark' });
   await sleep(250);
-  check(friend.me().health === 80, `'dark' zone tick costs 8 HP (health ${friend.me().health})`);
+  check(friend.me().health === 87, `'dark' zone tick costs 1 HP (health ${friend.me().health})`);
   friend.send({ type: 'playerDamage', source: 'star' });
   await sleep(250);
-  check(friend.me().health === 55, `'star' explosion costs 25 HP (health ${friend.me().health})`);
+  check(friend.me().health === 62, `'star' explosion costs 25 HP (health ${friend.me().health})`);
+  friend.send({ type: 'playerDamage', source: 'flare' });
+  await sleep(250);
+  check(friend.me().health === 47, `'flare' zone tick costs 15 HP (health ${friend.me().health})`);
 
   // --- Deplete the sun → moon phase: server seeds stars ---
   await depleteUntil([host, friend], s => s.phase === MOON);

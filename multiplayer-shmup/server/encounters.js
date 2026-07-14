@@ -20,6 +20,9 @@
 //   mechanic         client-side attack module (see MECHANICS in
 //                    public/mechanics.js)
 //   params           that mechanic's knobs, forwarded to clients
+//   mechanics        alternative to mechanic/params: a list of
+//                    { mechanic, params } run simultaneously every frame
+//                    (see activeMechanics in public/mechanics.js)
 //   transition       event that advances to the next phase: 'bossHpZero'
 //                    (boss HP depleted) or 'orbsDead' (all orbs down within
 //                    the kill window); omit on terminal phases
@@ -118,17 +121,29 @@ const ENCOUNTERS = {
         // The sun takes over the main body. Rotating rays sweep the arena,
         // pulsing between harmless telegraph and burning — the moon keeps
         // orbiting as a small satellite whose shadow cuts a safe wedge
-        // through them. The server broadcasts the ray angle / glow / moon
-        // position each tick (see sunDominant in phases.js) so every
-        // client's zones agree without clock sync.
+        // through them. On top of that, solar flares: server-seeded licks of
+        // flame (see the flare emission in sunDominant, phases.js) that stay
+        // close to the boss rather than spanning the arena, sweep faster
+        // than the rays, vary in width and reach, telegraph and burn longer —
+        // and ignore the moon's shadow entirely. The server broadcasts the
+        // ray angle / glow / moon position each tick (see sunDominant in
+        // phases.js) so every client's zones agree without clock sync.
         id: 'sun',
         bossHp: 400, bossDamageable: true,
         behavior: 'sunDominant',
         raySpeed: 0.22, // rad/s the rays sweep around the sun
         glowCycleMs: 5200, // one full fade-in/fade-out pulse of the rays
         orbitRadius: 140, orbitSpeed: 0.8, // the moon satellite's orbit (rad/s)
-        mechanic: 'sunRays',
-        params: { rayCount: 4, rayWidth: 0.55, rayActiveGlow: 0.55, shadowArc: 0.5, moonRadius: 13 },
+        flareInterval: 3200, // ms between seeded solar flares
+        flareWidthMin: 0.12, flareWidthMax: 0.42, // rad, each flare rolls a width in this range
+        flareLengthMin: 170, flareLengthMax: 300, // px reach from the boss — danger near the sun, not arena-wide
+        flareSpin: 0.7, // rad/s baseline flare sweep — noticeably faster than raySpeed
+        mechanics: [
+          { mechanic: 'sunRays', params: { rayCount: 4, rayWidth: 0.55, rayActiveGlow: 0.55, shadowArc: 0.5, moonRadius: 13 } },
+          // Longer telegraph and burn than the rays' glow pulse, since
+          // there's no safe zone — dodging a flare means outrunning it.
+          { mechanic: 'solarFlares', params: { telegraphMs: 1800, activeMs: 3000 } }
+        ],
         transition: 'bossHpZero',
         portrait: 'sun', bossTint: '#ffcc44',
         subtitle: "The sun blazes — shelter in the moon's shadow",
@@ -146,14 +161,14 @@ const ENCOUNTERS = {
         // Then the moon's turn: the arena goes pitch black and the dark
         // itself burns. The server seeds stars ('star' events, see
         // moonDominant in phases.js); each twinkles as a telegraph, explodes,
-        // and leaves a shrinking pool of starlight to shelter in. The moon
-        // itself gives off a small glow as the fallback refuge.
+        // and leaves a slowly shrinking pool of starlight to shelter in —
+        // the starlight is the ONLY refuge; the moon itself offers none.
         id: 'moon',
         bossHp: 400, bossDamageable: true,
         behavior: 'moonDominant',
         starInterval: 1100, // ms between seeded stars
         mechanic: 'starfield',
-        params: { twinkleMs: 1300, lightMs: 4500, lightRadius: 95, starBlastRadius: 55, moonGlowRadius: 110 },
+        params: { twinkleMs: 1300, lightMs: 7500, lightRadius: 140, starBlastRadius: 55 },
         transition: 'bossHpZero',
         portrait: 'moon', bossTint: '#c9d4ea',
         subtitle: 'Pitch black burns — stay in the starlight',
@@ -169,15 +184,16 @@ const ENCOUNTERS = {
       },
       {
         // Sun and moon converge: the moon disc slides over the sun
-        // (broadcast as mech.moonT, see converge in phases.js), totality
-        // blinds everyone for a beat, then the corona fires dense rings with
-        // a single rotating safe gap.
+        // (broadcast as mech.moonT, see converge in phases.js), then totality
+        // blinds everyone — again every blindIntervalMs, not just once — and
+        // between flashes the corona fires tightly packed bullet arcs with a
+        // single rotating safe gap.
         id: 'eclipse',
         bossHp: 700, bossDamageable: true,
         behavior: 'converge',
         convergeMs: 2600, // how long the moon takes to slide over the sun
         mechanic: 'eclipse',
-        params: { attackRate: 520, numberOfAngles: 18, bulletSpeed: 2.3, gapArc: 1.0, blindMs: 1000 },
+        params: { attackRate: 620, arcCount: 6, arcBullets: 7, arcSpan: 0.5, bulletSpeed: 2.5, gapArc: 1.0, blindMs: 1000, blindIntervalMs: 6500 },
         transition: 'bossHpZero',
         portrait: 'eclipse', bossTint: '#ffcc44',
         subtitle: 'Totality',
@@ -188,6 +204,20 @@ const ENCOUNTERS = {
             75: ['There is no light left for you!'],
             50: ['THE CORONA CONSUMES ALL!'],
             25: ['the alignment... is breaking—']
+          }
+        }
+      },
+      {
+        ...ENRAGE_BASE,
+        bossHp: 500, chaseSpeed: 90, aimedShotInterval: 1000, aimedBulletSpeed: 3.6,
+        mechanic: 'ring', params: TWIN_RING,
+        say: {
+          intensity: 4,
+          enter: ['the eclipse shatters — FINE. I need no sky to end you!'],
+          hp: {
+            75: ['SUN AND MOON BOTH RAGE IN ME!', 'You broke the heavens themselves!'],
+            50: ['TWO BLADES! ONE FURY!', 'I AM STILL THE GUARDIAN!'],
+            25: ['the twin light... is going out—', 'NOT YET! NOT LIKE THIS!', '*both halves flicker wildly*']
           }
         }
       },
@@ -461,10 +491,18 @@ if (process.env.FAST_TESTS === '1') {
   // phases in one synchronous pass before any client ever observes being in
   // them. Every other encounter here only ever runs with 1-2 players (a much
   // smaller worst-case burst), where the aggressive scale is safe.
+  // The bossHp floor must comfortably exceed a few BULLET_DAMAGE hits: a
+  // test hammering bossDamage always has a report or two in flight when a
+  // phase transition lands, and those spill into the next phase's fresh
+  // pool. Floored at 10, an enrage pool could arrive already one hit from
+  // dead and get one-shot before the test ever observes it (the
+  // chase-phase suite's "boss takes damage / roams during the chase"
+  // checks were flaky for exactly this reason).
+  const MIN_PHASE_HP = 40;
   for (const encounter of Object.values(ENCOUNTERS)) {
     if (encounter.id === 'twin') continue;
     for (const phase of encounter.phases) {
-      if ('bossHp' in phase) phase.bossHp = Math.max(10, Math.round(phase.bossHp * HP_SCALE));
+      if ('bossHp' in phase) phase.bossHp = Math.max(MIN_PHASE_HP, Math.round(phase.bossHp * HP_SCALE));
       if ('orbHp' in phase) phase.orbHp = Math.max(10, Math.round(phase.orbHp * HP_SCALE));
       if ('convergeMs' in phase) phase.convergeMs = Math.round(phase.convergeMs * TIME_SCALE);
     }

@@ -54,6 +54,7 @@ const PLAYER_DAMAGE_BY_SOURCE = {
   lightning: 25, // storm's lightning strikes, between a regular bullet and a missile
   star: 25, // twin's exploding stars, telegraphed like lightning
   ray: 12, // per tick standing in an active sun ray
+  flare: 15, // per tick caught in a solar flare — the moon's shadow doesn't shelter from these
   dark: 1 // per tick lost in the moon phase's pitch black
 };
 const WIND_MAX_STRENGTH = 120; // px/sec, storm's strongest gusts (see the wind block in gameLoop)
