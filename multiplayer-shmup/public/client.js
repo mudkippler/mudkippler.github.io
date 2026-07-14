@@ -173,6 +173,18 @@ function showMenu(error) {
     menuErrorEl.textContent = error || '';
 }
 
+// Undoes the ?lobby= "skip straight to join" UI (see below) so a failed
+// join (code doesn't exist, or the lobby already started) lands the player
+// back on the full menu instead of a dead-end join screen with no way to
+// create a lobby or try a different code.
+function resetToFullMenu() {
+    document.getElementById('create-lobby-section').style.display = '';
+    document.getElementById('join-code-field').style.display = '';
+    document.getElementById('join-lobby-heading').textContent = 'Join a lobby';
+    joinCodeInput.value = '';
+    history.replaceState(null, '', location.pathname);
+}
+
 function showLobbyScreen() {
     menuEl.style.display = 'none';
     lobbyScreenEl.style.display = 'block';
@@ -345,6 +357,7 @@ function connect() {
         }
 
         if (data.type === 'lobbyError') {
+            resetToFullMenu();
             showMenu(data.message);
             inGame = false;
             lobbyCode = null;

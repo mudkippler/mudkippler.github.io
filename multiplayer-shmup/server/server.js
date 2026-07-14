@@ -34,7 +34,7 @@ let playerIdCounter = 0;
 // bullets and their collisions are simulated locally on each client. The
 // server is only authoritative for player positions/health and boss health,
 // which is the minimum needed to see other players and share a boss HP pool.
-const TICK_RATE = 15;
+const TICK_RATE = 20;
 // Movement is scaled by measured elapsed time each tick (see gameLoop), not
 // a fixed per-tick step — setInterval isn't precise under load (multiple
 // lobbies, GC pauses), and a fixed-per-tick step would silently run slower
@@ -344,6 +344,10 @@ wss.on('connection', (ws) => {
         const lobby = lobbies[code];
         if (!lobby) {
           ws.send(serialize({ type: 'lobbyError', message: `Lobby ${code} not found.` }));
+          return;
+        }
+        if (lobby.started) {
+          ws.send(serialize({ type: 'lobbyError', message: `Lobby ${code} already started.` }));
           return;
         }
         if (Object.keys(lobby.players).length >= LOBBY_MAX_PLAYERS) {
