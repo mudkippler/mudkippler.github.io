@@ -89,7 +89,7 @@ const ENCOUNTERS = {
         // dropping straight down (see the fallingStars mechanic) — no big red
         // ball here anymore.
         id: 'main',
-        bossHp: 1000, bossDamageable: true,
+        bossHp: 750, bossDamageable: true,
         behavior: 'stationary',
         mechanics: [
           { mechanic: 'ring', params: TWIN_RING },
@@ -97,11 +97,10 @@ const ENCOUNTERS = {
         ],
         transition: 'bossHpZero',
         say: {
-          enter: ["Two blades, one purpose. Let's dance."],
+          enter: ["Equilibrium threatened. Commencing cycle."],
           hp: {
             75: ["You're better than I expected."],
-            50: ['Impressive. Truly.'],
-            25: ["...you're actually hurting me."]
+            50: ['Impressive. Truly.']
           }
         }
       },
@@ -113,7 +112,7 @@ const ENCOUNTERS = {
         // window, so it takes two players focusing different orbs.
         id: 'orbs',
         orbsDamageable: true,
-        behavior: 'twinOrbs', orbHp: 200, orbKillWindow: 3000,
+        behavior: 'twinOrbs', orbHp: 300, orbKillWindow: 3000,
         orbKinds: ['sun', 'moon'], // rendered gold/blue — they foreshadow the phases that follow
         // The two halves orbit the inactive boss (elliptical so they stay on
         // screen despite the boss sitting near the top edge).
@@ -129,8 +128,8 @@ const ENCOUNTERS = {
         transition: 'orbsDead',
         subtitle: 'Destroy the sun and moon — together',
         say: {
-          enter: ["i'm just getting started.."],
-          orbsRevive: ['you must strike them down together!']
+          enter: ["Symmetry broken. Re-calibrating."],
+          orbsRevive: ['You must strike them down together!']
         }
       },
       {
@@ -145,7 +144,7 @@ const ENCOUNTERS = {
         // ray angle / glow / moon position each tick (see sunDominant in
         // phases.js) so every client's zones agree without clock sync.
         id: 'sun',
-        bossHp: 400, bossDamageable: true,
+        bossHp: 800, bossDamageable: true,
         behavior: 'sunDominant',
         raySpeed: 0.22, // rad/s the rays sweep around the sun
         glowCycleMs: 5200, // one full fade-in/fade-out pulse of the rays
@@ -167,9 +166,8 @@ const ENCOUNTERS = {
           intensity: 1,
           enter: ['The SUN takes the sky! Burn in my radiance!'],
           hp: {
-            75: ['Feel the daylight sear!'],
-            50: ['My corona is ENDLESS!'],
-            25: ['The light... flickers?!']
+            75: ['Solar output maximized. Sterilization imminent.'],
+            50: ['Illumination brings ruin'],
           }
         }
       },
@@ -180,7 +178,7 @@ const ENCOUNTERS = {
         // and leaves a slowly shrinking pool of starlight to shelter in —
         // the starlight is the ONLY refuge; the moon itself offers none.
         id: 'moon',
-        bossHp: 400, bossDamageable: true,
+        bossHp: 800, bossDamageable: true,
         behavior: 'moonDominant',
         starInterval: 1100, // ms between seeded stars
         starFavorSafe: 0.6, // chance a new star is placed inside an existing light pool
@@ -198,11 +196,9 @@ const ENCOUNTERS = {
         subtitle: 'Pitch black burns — stay in the starlight',
         say: {
           intensity: 2,
-          enter: ['Then darkness. The MOON will swallow you whole.'],
+          enter: ['Light is a finite resource...'],
           hp: {
-            75: ['The stars are hungry tonight.'],
-            50: ['Lost in the dark yet?'],
-            25: ['No... the dawn is coming—']
+            25: ['The dawn is coming.']
           }
         }
       },
@@ -213,7 +209,7 @@ const ENCOUNTERS = {
         // between flashes the corona fires tightly packed bullet arcs with a
         // single rotating safe gap.
         id: 'eclipse',
-        bossHp: 700, bossDamageable: true,
+        bossHp: 500, bossDamageable: true,
         behavior: 'converge',
         convergeMs: 2600, // how long the moon takes to slide over the sun
         mechanic: 'eclipse',
@@ -231,29 +227,19 @@ const ENCOUNTERS = {
         subtitle: 'Totality',
         say: {
           intensity: 3,
-          enter: ['Sun and moon — TOGETHER. Witness the eclipse!'],
+          enter: ['Convergence begins.'],
           hp: {
-            75: ['There is no light left for you!'],
-            50: ['THE CORONA CONSUMES ALL!'],
-            25: ['the alignment... is breaking—']
           }
         }
       },
       {
-        ...ENRAGE_BASE,
-        bossHp: 500, chaseSpeed: 90, aimedShotInterval: 1000, aimedBulletSpeed: 3.6,
-        mechanic: 'ring', params: TWIN_RING,
-        say: {
-          intensity: 4,
-          enter: ['the eclipse shatters — FINE. I need no sky to end you!'],
-          hp: {
-            75: ['SUN AND MOON BOTH RAGE IN ME!', 'You broke the heavens themselves!'],
-            50: ['TWO BLADES! ONE FURY!', 'I AM STILL THE GUARDIAN!'],
-            25: ['the twin light... is going out—', 'NOT YET! NOT LIKE THIS!', '*both halves flicker wildly*']
-          }
-        }
-      },
-      DEFEATED
+        id: 'defeated',
+        victory: true,
+        mechanic: 'none',
+        portrait: 'defeat',
+        subtitle: 'Defeated',
+        say: { enter: ['The cycle ends.'] }
+      }
     ]
   },
 
