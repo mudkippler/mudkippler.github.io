@@ -68,7 +68,7 @@ const ENRAGE_ENTER = "you think that's the end of me?!";
 
 // Attack params shared by an encounter's main and enrage phases — the enrage
 // chase keeps firing the boss's signature pattern from wherever it roams.
-const TWIN_RING = { attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1 };
+const TWIN_RING = { attackRate: 100, numberOfAngles: 4, bulletSpeed: 1 };
 const STORM_RAIN = { attackRate: 45, drops: 9, bulletSpeed: 2.6 };
 const BLITZ_RING = { attackRate: 55, numberOfAngles: 4, bulletSpeed: 2, bigRedChance: 0.05 };
 const HELIX_SPIRAL = { attackRate: 60, arms: 3, bulletSpeed: 1.6 };
@@ -85,10 +85,16 @@ const ENCOUNTERS = {
     id: 'twin', name: 'The Twin Guardian',
     phases: [
       {
+        // Ring of bullets plus a sparse drizzle of slow "falling stars"
+        // dropping straight down (see the fallingStars mechanic) — no big red
+        // ball here anymore.
         id: 'main',
         bossHp: 1000, bossDamageable: true,
         behavior: 'stationary',
-        mechanic: 'ring', params: TWIN_RING,
+        mechanics: [
+          { mechanic: 'ring', params: TWIN_RING },
+          { mechanic: 'fallingStars', params: { attackRate: 650, bulletSpeed: 1.15, count: 1 } }
+        ],
         transition: 'bossHpZero',
         say: {
           enter: ["Two blades, one purpose. Let's dance."],
@@ -108,8 +114,18 @@ const ENCOUNTERS = {
         id: 'orbs',
         orbsDamageable: true,
         behavior: 'twinOrbs', orbHp: 200, orbKillWindow: 3000,
-        orbKinds: ['sun', 'moon'], // rendered gold/silver — they foreshadow the phases that follow
-        mechanic: 'orbRings', params: { attackRate: 200, numberOfAngles: 4, bulletSpeed: 1 },
+        orbKinds: ['sun', 'moon'], // rendered gold/blue — they foreshadow the phases that follow
+        // The two halves orbit the inactive boss (elliptical so they stay on
+        // screen despite the boss sitting near the top edge).
+        orbitRX: 150, orbitRY: 70, orbitSpeed: 0.7,
+        mechanic: 'twinHalves',
+        params: {
+          // Sun half: a hitscan laser — modest ~1s charge, then a brief
+          // slightly-wider beam that hits instantly.
+          laserInterval: 2600, laserChargeMs: 1000, laserActiveMs: 180, laserHalfWidth: 15,
+          // Moon half: stars that burst into four cardinal bullets.
+          starInterval: 1500, starBreakMs: 950, breakSpeed: 2.4
+        },
         transition: 'orbsDead',
         subtitle: 'Destroy the sun and moon — together',
         say: {
@@ -167,8 +183,16 @@ const ENCOUNTERS = {
         bossHp: 400, bossDamageable: true,
         behavior: 'moonDominant',
         starInterval: 1100, // ms between seeded stars
-        mechanic: 'starfield',
-        params: { twinkleMs: 1300, lightMs: 7500, lightRadius: 140, starBlastRadius: 55 },
+        starFavorSafe: 0.6, // chance a new star is placed inside an existing light pool
+        // Moonbeams: pale beams that sweep and slice through the safe pools.
+        // Angles + a shared telegraph/active pulse are broadcast each tick
+        // (see moonDominant in phases.js); they only burn while the pulse is
+        // high, so there's a clear "about to be harmful" tell.
+        moonbeamCount: 2, moonbeamSpeed: 0.4, moonbeamGlowCycleMs: 3200,
+        mechanics: [
+          { mechanic: 'starfield', params: { twinkleMs: 1300, lightMs: 7500, lightRadius: 140, starBlastRadius: 55 } },
+          { mechanic: 'moonbeams', params: { width: 0.34, activeGlow: 0.5 } }
+        ],
         transition: 'bossHpZero',
         portrait: 'moon', bossTint: '#c9d4ea',
         subtitle: 'Pitch black burns — stay in the starlight',
@@ -193,7 +217,15 @@ const ENCOUNTERS = {
         behavior: 'converge',
         convergeMs: 2600, // how long the moon takes to slide over the sun
         mechanic: 'eclipse',
-        params: { attackRate: 620, arcCount: 6, arcBullets: 7, arcSpan: 0.5, bulletSpeed: 2.5, gapArc: 1.0, blindMs: 1000, blindIntervalMs: 6500 },
+        // Denser, faster fans concentrated in a cone toward the players (not
+        // wasted firing behind the boss), a safe lane sweeping through them,
+        // plus a huge charged beam ~30% of the screen wide.
+        params: {
+          attackRate: 300, arcCount: 6, arcBullets: 5, arcSpan: 0.42, bulletSpeed: 2.6,
+          coneArc: 2.6, gapArc: 0.9,
+          blindMs: 1000, blindIntervalMs: 6500,
+          beamInterval: 5200, beamChargeMs: 1300, beamActiveMs: 650, beamWidthFrac: 0.3
+        },
         transition: 'bossHpZero',
         portrait: 'eclipse', bossTint: '#ffcc44',
         subtitle: 'Totality',

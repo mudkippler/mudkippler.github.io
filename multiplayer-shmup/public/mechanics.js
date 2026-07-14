@@ -19,6 +19,7 @@
 //                        damage tick immunity window live here
 //   params               this mechanic's `params` from the encounter def
 //   boss, orbs, wind     current entity/wind state from the server
+//   players              all players (for patterns that aim at the team)
 //   mech                 the phase's per-tick broadcast values (ray angle,
 //                        moon position, ...) or null — see lobby.mech
 //   stars                seeded stars from the server's 'star' events
@@ -37,7 +38,8 @@ import {
     rainAttack,
     stormRainAttack,
     lightningAttack,
-    bombardmentAttack
+    bombardmentAttack,
+    fallingStarAttack
 } from './attacks.js';
 
 // Local mirrors of the server's PLAYER_DAMAGE_BY_SOURCE amounts — used for
@@ -46,6 +48,9 @@ export const STAR_DAMAGE = 25;
 export const RAY_DAMAGE = 12;
 export const DARK_DAMAGE = 1;
 export const FLARE_DAMAGE = 15;
+export const LASER_DAMAGE = 20;
+export const BEAM_DAMAGE = 18;
+export const MOONBEAM_DAMAGE = 10;
 
 // A phase's active mechanics, normalized to a list: `mechanics` lets a phase
 // run several at once (each with its own params); the single
@@ -86,6 +91,19 @@ export function angleDiff(a, b) {
     if (d > Math.PI) d -= Math.PI * 2;
     if (d < -Math.PI) d += Math.PI * 2;
     return d;
+}
+
+// Whether a point lies within a beam: a rectangle rooted at (ox, oy),
+// pointing along `ang`, `hw` px to either side of its centerline, extending
+// `length` px forward (default well offscreen). Shared by the orb-phase sun
+// laser and the eclipse's huge corona beam, and by the renderer so what's
+// drawn is exactly what hits.
+export function isInBeam(x, y, ox, oy, ang, hw, length = 2000) {
+    const dx = x - ox, dy = y - oy;
+    const along = dx * Math.cos(ang) + dy * Math.sin(ang);
+    if (along < 0 || along > length) return false;
+    const perp = -dx * Math.sin(ang) + dy * Math.cos(ang);
+    return Math.abs(perp) < hw;
 }
 
 // --- Sun phase zone geometry (shared with the renderer so what burns is
@@ -176,15 +194,78 @@ export const MECHANICS = {
         }
     },
 
-    // Twin orb phase: each living orb fires the ring pattern instead of the
-    // (invulnerable) main body.
-    orbRings: {
+    // Sparse, slow bullets raining straight down — twin's phase-one garnish
+    // alongside the ring (see the main phase's `mechanics` list).
+    fallingStars: {
         update(ctx) {
             if (!fireReady(ctx)) return;
-            for (const orb of ctx.orbs) {
-                if (orb.hp > 0) circularAttack(orb, ctx.bossBullets, ctx.state.angleOffset || 0, ctx.params.numberOfAngles, ctx.params.bulletSpeed);
+            fallingStarAttack(ctx.bossBullets, ctx.params.bulletSpeed, ctx.params.count || 1);
+        }
+    },
+
+    // Twin orb phase: the two halves circle the (inactive) boss and attack in
+    // their own signature ways. The sun half charges a hitscan laser aimed at
+    // you; the moon half seeds stars that burst into four cardinal bullets.
+    // Both attacks' whole timelines are client-local (like the other bullet
+    // patterns) and live in this mechanic's scratch state so the renderer can
+    // draw the same charge/telegraph from the same values; the orb positions
+    // themselves are server-authoritative (ctx.orbs, orbited in phases.js).
+    twinHalves: {
+        update(ctx) {
+            const p = ctx.params;
+            const s = ctx.state;
+            const sun = ctx.orbs.find(o => o.kind === 'sun' && o.hp > 0);
+            const moon = ctx.orbs.find(o => o.kind === 'moon' && o.hp > 0);
+
+            // --- Sun half: charge → fire a hitscan beam locked on where you
+            // were when it started charging (move off the line to dodge). ---
+            if (sun) {
+                if (!s.laser && ctx.now - (s.lastLaser || 0) > p.laserInterval && ctx.myPos) {
+                    s.laser = {
+                        chargeStart: ctx.now, fired: false,
+                        ang: Math.atan2(ctx.myPos.y - sun.y, ctx.myPos.x - sun.x),
+                        ox: sun.x, oy: sun.y
+                    };
+                }
+                if (s.laser) {
+                    // Track the orb as it keeps orbiting through the charge.
+                    s.laser.ox = sun.x;
+                    s.laser.oy = sun.y;
+                    if (!s.laser.fired && ctx.now - s.laser.chargeStart >= p.laserChargeMs) {
+                        s.laser.fired = true;
+                        s.laser.fireAt = ctx.now;
+                        // Hitscan: one damage check against the (wider) beam the
+                        // instant it fires.
+                        if (ctx.alive && ctx.myPos
+                            && isInBeam(ctx.myPos.x, ctx.myPos.y, s.laser.ox, s.laser.oy, s.laser.ang, p.laserHalfWidth)) {
+                            ctx.addDamagePopup(ctx.myPos.x, ctx.myPos.y, -LASER_DAMAGE, 'red');
+                            ctx.send({ type: 'playerDamage', source: 'laser' });
+                        }
+                    }
+                    if (s.laser.fired && ctx.now - s.laser.fireAt > p.laserActiveMs) {
+                        s.lastLaser = ctx.now;
+                        s.laser = null;
+                    }
+                }
+            } else {
+                s.laser = null;
             }
-            ctx.state.angleOffset = (ctx.state.angleOffset || 0) + 0.15;
+
+            // --- Moon half: seed stars that burst into four cardinal bullets. ---
+            s.breakStars = s.breakStars || [];
+            if (moon && ctx.now - (s.lastStar || 0) > p.starInterval) {
+                s.lastStar = ctx.now;
+                s.breakStars.push({ x: 80 + Math.random() * 640, y: 70 + Math.random() * 320, spawn: ctx.now });
+            }
+            for (let i = s.breakStars.length - 1; i >= 0; i--) {
+                const st = s.breakStars[i];
+                if (ctx.now - st.spawn >= p.starBreakMs) {
+                    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                        ctx.bossBullets.push({ x: st.x, y: st.y, dx: dx * p.breakSpeed, dy: dy * p.breakSpeed, type: 10, size: 6 });
+                    }
+                    s.breakStars.splice(i, 1);
+                }
+            }
         }
     },
 
@@ -334,11 +415,36 @@ export const MECHANICS = {
         }
     },
 
+    // Twin's moon phase, second simultaneous mechanic: moonbeams — pale beams
+    // that sweep across the arena and slice through the safe starlight too, so
+    // a light pool isn't unconditionally safe. Geometry (beam angles + a
+    // shared telegraph/active pulse) is server-broadcast in ctx.mech, same as
+    // the sun rays, so every client agrees; they only burn while active (the
+    // pulse is high), giving a clear "about to be harmful" tell.
+    moonbeams: {
+        update(ctx) {
+            const mech = ctx.mech;
+            if (!mech || !mech.beams || !ctx.alive || !ctx.myPos) return;
+            if (mech.glow < ctx.params.activeGlow) return; // beams only telegraphing
+            const ang = Math.atan2(ctx.myPos.y - ctx.boss.y, ctx.myPos.x - ctx.boss.x);
+            for (const beam of mech.beams) {
+                if (Math.abs(angleDiff(ang, beam)) < ctx.params.width / 2) {
+                    zoneTick(ctx, MOONBEAM_DAMAGE, 'moonbeam');
+                    return;
+                }
+            }
+        }
+    },
+
     // Twin's eclipse: quiet while the moon slides over the sun (mech.moonT
     // ramping 0..1), then totality — a blinding flash that recurs every
-    // blindIntervalMs, and between flashes the corona fires tightly packed
-    // bullet arcs with a single rotating safe gap. The blind timestamp lives
-    // in state so the renderer can draw the same flash.
+    // blindIntervalMs. Between flashes the corona fires two layered threats:
+    // a huge charged beam roughly a third of the screen wide (aimed at the
+    // team, offscreen-long), and dense bullet fans concentrated in a cone
+    // toward where the players are (rather than wasted firing behind the boss,
+    // which sits at the top of the arena) with a safe lane sweeping through
+    // them. State holds the blind clock and the beam so the renderer draws
+    // the same flash/beam.
     eclipse: {
         update(ctx) {
             const t = ctx.mech ? ctx.mech.moonT : 0;
@@ -349,18 +455,24 @@ export const MECHANICS = {
             if (ctx.params.blindIntervalMs && ctx.now - ctx.state.blindStart > ctx.params.blindIntervalMs) {
                 ctx.state.blindStart = ctx.now;
             }
-            if (ctx.now < ctx.state.blindStart + ctx.params.blindMs * 0.5) return; // firing pauses while blinded
+            const blinded = ctx.now < ctx.state.blindStart + ctx.params.blindMs * 0.5;
+
+            updateEclipseBeam(ctx);
+            if (blinded) return; // firing pauses while blinded
 
             if (!fireReady(ctx)) return;
-            // Each volley: arcCount evenly spaced arcs, each a tight fan of
-            // arcBullets bullets spanning arcSpan radians — they fly outward
-            // as dense curved bands. One arc slot rotates as the safe gap.
-            const gap = ctx.state.gapAngle || 0;
-            const arcStep = Math.PI * 2 / ctx.params.arcCount;
+            const focus = playerFocusAngle(ctx); // toward the team, fallback straight down
+            const cone = ctx.params.coneArc;
+            // A safe lane that sweeps back and forth across the cone.
+            ctx.state.gapPhase = (ctx.state.gapPhase || 0) + 0.5;
+            const gapCenter = focus + Math.sin(ctx.state.gapPhase) * cone * 0.4;
             const spacing = ctx.params.arcSpan / Math.max(1, ctx.params.arcBullets - 1);
             for (let i = 0; i < ctx.params.arcCount; i++) {
-                const center = i * arcStep;
-                if (Math.abs(angleDiff(center, gap)) < ctx.params.gapArc / 2) continue; // the safe gap
+                const frac = ctx.params.arcCount > 1 ? i / (ctx.params.arcCount - 1) - 0.5 : 0;
+                // Spread across the cone, plus per-arc jitter so the aim favors
+                // the players without being perfectly, readably locked on.
+                let center = focus + frac * cone + (Math.random() - 0.5) * (cone / ctx.params.arcCount) * 0.7;
+                if (Math.abs(angleDiff(center, gapCenter)) < ctx.params.gapArc / 2) continue; // the safe lane
                 for (let j = 0; j < ctx.params.arcBullets; j++) {
                     const ang = center + (j - (ctx.params.arcBullets - 1) / 2) * spacing;
                     ctx.bossBullets.push({
@@ -373,7 +485,44 @@ export const MECHANICS = {
                     });
                 }
             }
-            ctx.state.gapAngle = gap + 0.4;
         }
     }
 };
+
+// Direction from the boss toward the team's centroid (living players only),
+// used to aim the eclipse's fans/beam at where people actually are. Falls
+// back to straight down — into the arena — when there's no one to aim at
+// (everyone dead/spectating), since the boss sits up at the top edge.
+function playerFocusAngle(ctx) {
+    const living = (ctx.players || []).filter(p => !p.dead);
+    if (living.length === 0) return Math.PI / 2;
+    const cx = living.reduce((s, p) => s + p.x, 0) / living.length;
+    const cy = living.reduce((s, p) => s + p.y, 0) / living.length;
+    return Math.atan2(cy - ctx.boss.y, cx - ctx.boss.x);
+}
+
+// The eclipse's huge corona beam: an independent charge → fire cycle running
+// alongside the bullet fans. Locks onto the team when it starts charging,
+// telegraphs for beamChargeMs, then burns for beamActiveMs as a wide beam.
+// Kept in the mechanic's scratch so the renderer draws the same beam.
+function updateEclipseBeam(ctx) {
+    const p = ctx.params, s = ctx.state;
+    if (!p.beamInterval) return;
+    if (!s.beam) {
+        if (ctx.now - (s.lastBeam || 0) > p.beamInterval) {
+            s.beam = { start: ctx.now, ang: playerFocusAngle(ctx), fired: false };
+        }
+        return;
+    }
+    const b = s.beam;
+    b.hw = 800 * p.beamWidthFrac / 2; // ~a third of the screen wide
+    if (ctx.now - b.start < p.beamChargeMs) return; // still charging (telegraph only)
+    if (!b.fired) { b.fired = true; b.fireAt = ctx.now; }
+    if (ctx.alive && ctx.myPos && isInBeam(ctx.myPos.x, ctx.myPos.y, ctx.boss.x, ctx.boss.y, b.ang, b.hw)) {
+        zoneTick(ctx, BEAM_DAMAGE, 'beam');
+    }
+    if (ctx.now - b.fireAt > p.beamActiveMs) {
+        s.lastBeam = ctx.now;
+        s.beam = null;
+    }
+}

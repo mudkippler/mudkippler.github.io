@@ -113,7 +113,8 @@ async function depleteUntil(clients, predicate, maxMs = 45000) {
   await depleteUntil([host, friend], s => s.phase === MOON);
   s = host.lastState();
   check(s.phase === MOON, `sun depletion enters the moon phase (was ${s.phase})`);
-  check(s.mech === undefined, 'moon phase carries no per-tick mech payload');
+  check(s.mech && Array.isArray(s.mech.beams) && typeof s.mech.glow === 'number',
+    `moon phase broadcasts moonbeam angles + a pulse (${JSON.stringify(s.mech)})`);
 
   const star1 = await host.waitForNext('star', 3000);
   const star2 = await friend.waitForNext('star', 3000);

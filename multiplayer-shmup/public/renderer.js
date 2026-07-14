@@ -346,9 +346,27 @@ function drawMoonPhase(view, entry, boss) {
     for (const star of stars) {
         const age = now - star.spawn;
         if (age < params.twinkleMs) {
+            const dangerFrac = age / params.twinkleMs;
+
+            // Explosion-radius telegraph: a reddish ring at the exact blast
+            // radius, filling in as detonation nears, so a star landing in
+            // your safe pool warns you which ground to vacate.
+            ctx.globalAlpha = 0.12 + 0.25 * dangerFrac;
+            ctx.fillStyle = '#ff6a6a';
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, params.starBlastRadius * (0.4 + 0.6 * dangerFrac), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.3 + 0.5 * dangerFrac;
+            ctx.strokeStyle = '#ff8a8a';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 6]);
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, params.starBlastRadius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
             // Twinkle telegraph: a four-point sparkle that grows and pulses
             // faster as the explosion nears.
-            const dangerFrac = age / params.twinkleMs;
             const size = 4 + dangerFrac * 8;
             ctx.globalAlpha = 0.45 + 0.45 * Math.abs(Math.sin(now / (140 - 90 * dangerFrac)));
             ctx.strokeStyle = '#fff7d0';
@@ -386,6 +404,135 @@ function drawMoonPhase(view, entry, boss) {
     ctx.globalAlpha = 1;
 }
 
+// Moon phase, second layer: the sweeping moonbeams (server-broadcast angles
+// in mech.beams + a shared pulse in mech.glow). Faint while telegraphing,
+// bright with glowing edges while active — the "about to be harmful" tell —
+// and drawn over the darkness so they visibly slice through the safe pools.
+function drawMoonbeams(view, entry, boss) {
+    const mech = view.mech;
+    if (!mech || !mech.beams) return;
+    const w = entry.params.width;
+    const active = mech.glow >= entry.params.activeGlow;
+
+    ctx.save();
+    for (const beam of mech.beams) {
+        ctx.globalAlpha = active ? 0.16 + 0.24 * mech.glow : 0.05 + 0.07 * mech.glow;
+        ctx.fillStyle = active ? '#cfe4ff' : '#8fa2c4';
+        ctx.beginPath();
+        ctx.moveTo(boss.x, boss.y);
+        ctx.arc(boss.x, boss.y, RAY_LENGTH, beam - w / 2, beam + w / 2);
+        ctx.closePath();
+        ctx.fill();
+
+        if (active) {
+            ctx.globalAlpha = 0.4 + 0.4 * mech.glow;
+            ctx.strokeStyle = '#eaf3ff';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = '#9fc3ff';
+            ctx.shadowBlur = 12;
+            for (const side of [-1, 1]) {
+                const edge = beam + side * w / 2;
+                ctx.beginPath();
+                ctx.moveTo(boss.x, boss.y);
+                ctx.lineTo(boss.x + Math.cos(edge) * RAY_LENGTH, boss.y + Math.sin(edge) * RAY_LENGTH);
+                ctx.stroke();
+            }
+            ctx.shadowBlur = 0;
+        }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+}
+
+// Orb phase: the two halves' signature attacks, all timed client-side and
+// held in the mechanic's scratch (entry.state) so this draws exactly what
+// twinHalves in mechanics.js will hit with. The sun's charging/firing laser
+// and the moon's about-to-burst stars.
+function drawTwinHalves(view, entry) {
+    const now = performance.now();
+    const p = entry.params;
+    const s = entry.state;
+
+    if (s.laser) {
+        const { ox, oy, ang } = s.laser;
+        const ex = ox + Math.cos(ang) * RAY_LENGTH, ey = oy + Math.sin(ang) * RAY_LENGTH;
+        const nx = -Math.sin(ang), ny = Math.cos(ang);
+        ctx.save();
+        if (!s.laser.fired) {
+            // Charging: a thin dashed line thickening/brightening toward the shot.
+            const frac = Math.min(1, (now - s.laser.chargeStart) / p.laserChargeMs);
+            ctx.globalAlpha = 0.3 + 0.5 * frac;
+            ctx.strokeStyle = '#ffd24d';
+            ctx.lineWidth = 1 + 3 * frac;
+            ctx.shadowColor = '#ffcc44';
+            ctx.shadowBlur = 8 + 12 * frac;
+            ctx.setLineDash([10, 8]);
+            ctx.beginPath();
+            ctx.moveTo(ox, oy);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 0.5 * frac;
+            ctx.fillStyle = '#fff0b0';
+            ctx.beginPath();
+            ctx.arc(ox, oy, 6 + 10 * frac, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // Fired: the wider beam, a bright band fading over its active window.
+            const fade = 1 - Math.min(1, (now - s.laser.fireAt) / p.laserActiveMs);
+            const hw = p.laserHalfWidth;
+            const g = ctx.createLinearGradient(ox - nx * hw, oy - ny * hw, ox + nx * hw, oy + ny * hw);
+            g.addColorStop(0, 'rgba(255, 210, 80, 0)');
+            g.addColorStop(0.5, 'rgba(255, 245, 200, 0.95)');
+            g.addColorStop(1, 'rgba(255, 210, 80, 0)');
+            ctx.globalAlpha = 0.85 * fade;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(ox + nx * hw, oy + ny * hw);
+            ctx.lineTo(ox - nx * hw, oy - ny * hw);
+            ctx.lineTo(ex - nx * hw, ey - ny * hw);
+            ctx.lineTo(ex + nx * hw, ey + ny * hw);
+            ctx.closePath();
+            ctx.fill();
+            ctx.globalAlpha = fade;
+            ctx.strokeStyle = '#fffdf4';
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#ffcc44';
+            ctx.shadowBlur = 16;
+            ctx.beginPath();
+            ctx.moveTo(ox, oy);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    for (const st of (s.breakStars || [])) {
+        const frac = Math.min(1, (now - st.spawn) / p.starBreakMs);
+        const size = 6 + frac * 8;
+        ctx.save();
+        // Cardinal ticks previewing the four directions it's about to fire.
+        ctx.globalAlpha = 0.5 + 0.4 * Math.abs(Math.sin(now / 120));
+        ctx.strokeStyle = '#8fd6ff';
+        ctx.lineWidth = 2;
+        ctx.shadowColor = '#8fd6ff';
+        ctx.shadowBlur = 8;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            ctx.beginPath();
+            ctx.moveTo(st.x + dx * 4, st.y + dy * 4);
+            ctx.lineTo(st.x + dx * size, st.y + dy * size);
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = '#cdeaff';
+        ctx.beginPath();
+        ctx.arc(st.x, st.y, 3 + frac * 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+}
+
 // Eclipse (over layer): the corona blazing behind, the sun disc, the moon
 // disc sliding over it as mech.moonT ramps 0..1, the boss riding on top of
 // the stacked discs once totality hits, and the recurring blind flash.
@@ -417,6 +564,56 @@ function drawEclipse(view, entry, boss, encounterId, bossState) {
     ctx.arc(boss.x + ECLIPSE_MOON_START.x * (1 - moonT), boss.y + ECLIPSE_MOON_START.y * (1 - moonT), boss.radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+
+    // The huge corona beam: telegraphs as a wide dim wedge while charging,
+    // then a searing band while it fires. Geometry (origin/angle/half-width)
+    // matches isInBeam in the eclipse mechanic exactly.
+    if (state.beam && state.beam.hw) {
+        const b = state.beam;
+        const ex = boss.x + Math.cos(b.ang) * RAY_LENGTH, ey = boss.y + Math.sin(b.ang) * RAY_LENGTH;
+        const nx = -Math.sin(b.ang), ny = Math.cos(b.ang);
+        const poly = () => {
+            ctx.beginPath();
+            ctx.moveTo(boss.x + nx * b.hw, boss.y + ny * b.hw);
+            ctx.lineTo(boss.x - nx * b.hw, boss.y - ny * b.hw);
+            ctx.lineTo(ex - nx * b.hw, ey - ny * b.hw);
+            ctx.lineTo(ex + nx * b.hw, ey + ny * b.hw);
+            ctx.closePath();
+        };
+        ctx.save();
+        if (now - b.start < params.beamChargeMs) {
+            const frac = (now - b.start) / params.beamChargeMs;
+            ctx.globalAlpha = 0.08 + 0.16 * frac;
+            ctx.fillStyle = '#ffcc66';
+            poly();
+            ctx.fill();
+            ctx.globalAlpha = 0.35 + 0.45 * frac;
+            ctx.strokeStyle = '#ffe08a';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([16, 12]);
+            for (const side of [-1, 1]) {
+                ctx.beginPath();
+                ctx.moveTo(boss.x + side * nx * b.hw, boss.y + side * ny * b.hw);
+                ctx.lineTo(ex + side * nx * b.hw, ey + side * ny * b.hw);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+        } else {
+            const fade = b.fireAt ? 1 - Math.min(1, (now - b.fireAt) / params.beamActiveMs) : 1;
+            const g = ctx.createLinearGradient(boss.x + nx * b.hw, boss.y + ny * b.hw, boss.x - nx * b.hw, boss.y - ny * b.hw);
+            g.addColorStop(0, 'rgba(255, 200, 80, 0)');
+            g.addColorStop(0.5, 'rgba(255, 250, 220, 0.92)');
+            g.addColorStop(1, 'rgba(255, 200, 80, 0)');
+            ctx.globalAlpha = 0.9 * fade;
+            ctx.fillStyle = g;
+            ctx.shadowColor = '#ffcc44';
+            ctx.shadowBlur = 26;
+            poly();
+            ctx.fill();
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+    }
 
     // Once totality hits, the boss itself rides on top of the stacked sun
     // and moon discs instead of being swallowed by them.
@@ -504,6 +701,8 @@ function drawMechanicOver(view, boss, encounterId, bossState) {
     if (!view) return;
     for (const entry of view.mechanics) {
         if (entry.name === 'starfield') drawMoonPhase(view, entry, boss);
+        else if (entry.name === 'moonbeams') drawMoonbeams(view, entry, boss);
+        else if (entry.name === 'twinHalves') drawTwinHalves(view, entry);
         else if (entry.name === 'eclipse') drawEclipse(view, entry, boss, encounterId, bossState);
     }
 }
@@ -706,10 +905,25 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     if (orbs) {
         const ORB_RADIUS = 18;
         // Orbs can carry a kind (twin's sun/moon pair); plain orbs stay violet.
-        const ORB_COLORS = { sun: '#ffd24d', moon: '#cdd6e8' };
+        // The sun half glows yellow, the moon half light blue.
+        const ORB_COLORS = { sun: '#ffd24d', moon: '#7fd0ff' };
+        const ORB_GLOW = { sun: 'rgba(255, 200, 60, 0.55)', moon: 'rgba(120, 200, 255, 0.55)' };
         for (const orb of orbs) {
             const alive = orb.hp > 0;
             ctx.globalAlpha = alive ? 1 : 0.25;
+
+            // Soft radial halo in the half's color so the two read as the sun
+            // and the moon well before their phases arrive.
+            if (alive && ORB_GLOW[orb.kind]) {
+                const gr = ctx.createRadialGradient(orb.x, orb.y, ORB_RADIUS * 0.5, orb.x, orb.y, ORB_RADIUS * 2.3);
+                gr.addColorStop(0, ORB_GLOW[orb.kind]);
+                gr.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = gr;
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, ORB_RADIUS * 2.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
             ctx.fillStyle = ORB_COLORS[orb.kind] || 'violet';
             ctx.beginPath();
             ctx.arc(orb.x, orb.y, ORB_RADIUS, 0, Math.PI * 2);
@@ -815,13 +1029,15 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     // every bullet of that type (the value is the trail's fully-faded end
     // color, i.e. the bullet color at alpha 0, so the gradient fades cleanly).
     const BULLET_STYLES = {
-        1: { color: 'cyan', size: 6, trail: 'rgba(0, 255, 255, 0)' },      // circular ring
-        2: { color: 'red', size: 20 },                                     // big red ball
-        3: { color: 'orange', size: 8, trail: 'rgba(255, 165, 0, 0)' },    // enrage-chase aimed shots
-        4: { color: 'magenta', size: 5 },                                  // spiral arms
-        5: { color: 'gold', size: 5 },                                     // sweeping wave fan
-        6: { color: 'greenyellow', size: 5 },                              // acid rain droplets
-        8: { color: '#e8d5ff', size: 6, trail: 'rgba(232, 213, 255, 0)' }  // eclipse corona arcs
+        1: { color: 'cyan', size: 6, trail: 'rgba(0, 255, 255, 0)' },        // circular ring
+        2: { color: 'red', size: 20 },                                       // big red ball
+        3: { color: 'orange', size: 8, trail: 'rgba(255, 165, 0, 0)' },      // enrage-chase aimed shots
+        4: { color: 'magenta', size: 5 },                                    // spiral arms
+        5: { color: 'gold', size: 5 },                                       // sweeping wave fan
+        6: { color: 'greenyellow', size: 5 },                                // acid rain droplets
+        8: { color: '#e8d5ff', size: 6, trail: 'rgba(232, 213, 255, 0)' },   // eclipse corona arcs
+        9: { color: '#dfefff', size: 5, trail: 'rgba(223, 239, 255, 0)' },   // twin phase-1 falling stars
+        10: { color: '#8fd6ff', size: 6, trail: 'rgba(143, 214, 255, 0)' }   // moon half's cardinal burst
     };
     for (const b of bossBullets) {
         if (b.type === 7) {

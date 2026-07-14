@@ -49,7 +49,7 @@ const RECONCILE_SNAP = 80; // px
 // attack simulation and its flags drive the UI.
 const DEFAULT_ENCOUNTER = {
     id: 'twin', name: 'The Twin Guardian',
-    phases: [{ id: 'main', bossDamageable: true, mechanic: 'ring', params: { attackRate: 100, numberOfAngles: 4, bulletSpeed: 1, bigRedChance: 0.1 } }]
+    phases: [{ id: 'main', bossDamageable: true, mechanic: 'ring', params: { attackRate: 100, numberOfAngles: 4, bulletSpeed: 1 } }]
 };
 
 let myId = null;
@@ -805,6 +805,7 @@ function updateLocalCombat(now, myPos, alive) {
             params: entry.params || {},
             boss,
             orbs,
+            players: Object.values(players),
             wind,
             mech,
             stars: bossStars,

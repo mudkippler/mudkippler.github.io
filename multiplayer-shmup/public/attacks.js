@@ -68,6 +68,23 @@ export function waveAttack(boss, bossBullets, now, bulletVelocity = 1.8, fanCoun
     }
 }
 
+// Twin phase-one "falling stars": sparse, slow bullets that drop straight
+// down from the top edge in a clean vertical line (no sideways drift, unlike
+// the rain patterns). Read the columns and side-step them.
+export function fallingStarAttack(bossBullets, bulletVelocity = 1.15, count = 1) {
+    for (let i = 0; i < count; i++) {
+        bossBullets.push({
+            id: bulletIdCounter++,
+            x: 40 + Math.random() * 720,
+            y: 1, // just inside the top edge so the offscreen cull doesn't eat it
+            dx: 0,
+            dy: bulletVelocity,
+            type: 9, // 9 for falling star — see BULLET_STYLES in renderer.js
+            size: 5
+        });
+    }
+}
+
 // Droplets falling from random points along the top edge with a little
 // sideways drift — dodging is about reading the whole sky, not the boss.
 export function rainAttack(bossBullets, bulletVelocity = 2.2, drops = 3) {

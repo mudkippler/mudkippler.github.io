@@ -167,23 +167,30 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
   const BEHAVIORS = {
     stationary: {},
 
-    // Bobs the orbs and enforces the kill-together window: a lone dead orb
-    // revives after def.orbKillWindow ms unless its twin also falls.
+    // Orbits the two halves around the (inactive) boss on an ellipse and
+    // enforces the kill-together window: a lone dead orb revives after
+    // def.orbKillWindow ms unless its twin also falls. The ellipse keeps them
+    // on screen despite the boss sitting near the top edge; the halves start
+    // on opposite sides so two players can split them.
     twinOrbs: {
       onEnter(lobby, def) {
+        lobby.phaseState.startedAt = Date.now();
         lobby.orbs = [0, 1].map(i => {
-          const x = lobby.boss.x + (i === 0 ? -150 : 150);
-          const y = lobby.boss.y + 50;
           const kind = def.orbKinds && def.orbKinds[i];
-          return { id: i, kind, baseX: x, baseY: y, x, y, hp: def.orbHp, maxHp: def.orbHp, deadAt: null };
+          const baseAngle = i === 0 ? Math.PI : 0; // sun left, moon right
+          return { id: i, kind, baseAngle, x: lobby.boss.x, y: lobby.boss.y, hp: def.orbHp, maxHp: def.orbHp, deadAt: null };
         });
       },
       onExit(lobby) {
         lobby.orbs = [];
       },
       update(lobby, def, now) {
+        const elapsed = (now - lobby.phaseState.startedAt) / 1000;
+        const rx = def.orbitRX || 150, ry = def.orbitRY || 70;
         for (const orb of lobby.orbs) {
-          orb.y = orb.baseY + Math.sin(now / 400 + orb.id * Math.PI) * 15;
+          const angle = orb.baseAngle + elapsed * (def.orbitSpeed || 0.7);
+          orb.x = lobby.boss.x + Math.cos(angle) * rx;
+          orb.y = lobby.boss.y + Math.sin(angle) * ry;
         }
 
         const dead = lobby.orbs.filter(o => o.hp <= 0);
@@ -287,19 +294,60 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
     // player sees the same light pools — they're shared geography the team
     // coordinates around, unlike bullets which can safely stay client-local.
     // The twinkle/explosion/light timing all runs client-side from the
-    // event's arrival (see the starfield mechanic in mechanics.js).
+    // event's arrival (see the starfield mechanic in mechanics.js). Also
+    // broadcasts the moonbeam angles + a shared pulse each tick (moonbeams
+    // mechanic), the same way sunDominant broadcasts its rays.
     moonDominant: {
       onEnter(lobby) {
+        lobby.phaseState.startedAt = Date.now();
         lobby.phaseState.nextStar = Date.now() + 800;
+        lobby.phaseState.pools = []; // recently-seeded stars, for the safe-spawn bias
+      },
+      onExit(lobby) {
+        lobby.mech = null;
       },
       update(lobby, def, now) {
-        if (now < lobby.phaseState.nextStar) return;
-        lobby.phaseState.nextStar = now + def.starInterval;
-        emit(lobby, {
-          type: 'star',
-          x: t(STAR_BOUNDS.xMin + Math.random() * (STAR_BOUNDS.xMax - STAR_BOUNDS.xMin)),
-          y: t(STAR_BOUNDS.yMin + Math.random() * (STAR_BOUNDS.yMax - STAR_BOUNDS.yMin))
+        const state = lobby.phaseState;
+        const elapsed = (now - state.startedAt) / 1000;
+
+        // Moonbeams: evenly spaced angles all sweeping together, plus a shared
+        // telegraph→active pulse (harmful only near the top of the cycle).
+        const count = def.moonbeamCount || 2;
+        const beams = [];
+        for (let i = 0; i < count; i++) {
+          beams.push(r2((i * (Math.PI * 2 / count) + elapsed * (def.moonbeamSpeed || 0.4)) % (Math.PI * 2)));
+        }
+        const glow = 0.5 - 0.5 * Math.cos((elapsed * 1000 / (def.moonbeamGlowCycleMs || 3200)) * Math.PI * 2);
+        lobby.mech = { beams, glow: r2(glow) };
+
+        if (now < state.nextStar) return;
+        state.nextStar = now + def.starInterval;
+
+        // Bias new stars toward existing safe pools so the light isn't a pure
+        // refuge — the explosion is telegraphed client-side (starBlastRadius),
+        // so players in a pool get warning to step aside. Pool light timing
+        // mirrors the client's starLightRadius, read from the starfield params.
+        const sp = (def.mechanics.find(m => m.mechanic === 'starfield') || {}).params || {};
+        state.pools = state.pools.filter(p => now - p.spawn < sp.twinkleMs + sp.lightMs);
+        const litPools = state.pools.filter(p => {
+          const lightAge = now - p.spawn - sp.twinkleMs;
+          return lightAge > 0 && lightAge < sp.lightMs;
         });
+
+        let x, y;
+        if (litPools.length && Math.random() < (def.starFavorSafe || 0)) {
+          const pool = litPools[Math.floor(Math.random() * litPools.length)];
+          const lightAge = now - pool.spawn - sp.twinkleMs;
+          const r = sp.lightRadius * (1 - lightAge / sp.lightMs) * 0.55; // land well inside the lit area
+          const a = Math.random() * Math.PI * 2, d = Math.random() * r;
+          x = Math.max(STAR_BOUNDS.xMin, Math.min(STAR_BOUNDS.xMax, pool.x + Math.cos(a) * d));
+          y = Math.max(STAR_BOUNDS.yMin, Math.min(STAR_BOUNDS.yMax, pool.y + Math.sin(a) * d));
+        } else {
+          x = STAR_BOUNDS.xMin + Math.random() * (STAR_BOUNDS.xMax - STAR_BOUNDS.xMin);
+          y = STAR_BOUNDS.yMin + Math.random() * (STAR_BOUNDS.yMax - STAR_BOUNDS.yMin);
+        }
+        state.pools.push({ x, y, spawn: now });
+        emit(lobby, { type: 'star', x: t(x), y: t(y) });
       }
     },
 

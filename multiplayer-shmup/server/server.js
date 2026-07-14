@@ -55,6 +55,9 @@ const PLAYER_DAMAGE_BY_SOURCE = {
   star: 25, // twin's exploding stars, telegraphed like lightning
   ray: 12, // per tick standing in an active sun ray
   flare: 15, // per tick caught in a solar flare — the moon's shadow doesn't shelter from these
+  laser: 20, // the orb-phase sun half's charged hitscan beam (a single hit when it fires)
+  beam: 18, // per tick in the eclipse's huge corona beam
+  moonbeam: 10, // per tick sliced by a moon-phase moonbeam, even inside the starlight
   dark: 1 // per tick lost in the moon phase's pitch black
 };
 const WIND_MAX_STRENGTH = 120; // px/sec, storm's strongest gusts (see the wind block in gameLoop)
@@ -143,7 +146,7 @@ function createLobby(encounterId) {
     phaseIndex: 0, // index into encounter.phases; the phase def is authoritative for what's damageable/active
     phaseState: {}, // per-phase scratch for the phase's server behavior (see phases.js)
     mech: null, // per-tick mechanic values some behaviors broadcast (ray angle, moon position, ...)
-    orbs: [], // {id, baseX, baseY, x, y, hp, maxHp, deadAt} — spawned/owned by the twinOrbs behavior
+    orbs: [], // {id, kind, baseAngle, x, y, hp, maxHp, deadAt} — spawned/owned by the twinOrbs behavior
     damageLog: {}, // id -> {name, color, dmg}
     graves: [], // {x, y, color} markers left where players have died
     hpTaunts: new Set() // 'phase1-75'/'enrage-25'/etc — HP milestones already spoken this run
