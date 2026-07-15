@@ -1,7 +1,7 @@
 // E2E coverage of bombardment's "launch codes" phase: each player gets their
 // own maze (see the launchCodes behavior in server/phases.js), touching a
 // wall kills instantly, and reaching the exit clears the phase.
-const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
+import { check, finish, makeClient, sleep, phaseIndex } from './helpers.js';
 
 async function damageBossUntil(client, predicate, maxHits = 550) {
   for (let i = 0; i < maxHits; i++) {

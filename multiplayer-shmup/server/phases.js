@@ -513,4 +513,4 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
   return { currentPhase, enterPhase, advancePhase, trigger, update, checkHpTaunts };
 }
 
-module.exports = { createPhaseEngine };
+export { createPhaseEngine };

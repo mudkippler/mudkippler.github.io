@@ -4,7 +4,7 @@
 // phase (baseline state broadcasts + shot relays) and in the sun phase,
 // whose per-tick mech broadcast (ray/glow/moon) is the heaviest state
 // payload in the game.
-const { check, finish, makeClient, sleep, phaseIndex } = require('./helpers');
+import { check, finish, makeClient, sleep, phaseIndex } from './helpers.js';
 
 const MAX_KBPS = 50;
 const PLAYER_COUNT = 10; // must match the server's LOBBY_MAX_PLAYERS

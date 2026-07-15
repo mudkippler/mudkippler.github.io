@@ -1,6 +1,6 @@
 // E2E coverage of the lobby system: create/join, encounters, host controls,
 // multiple concurrent lobbies, and host handoff.
-const { check, finish, makeClient, sleep, phaseHp } = require('./helpers');
+import { check, finish, makeClient, sleep, phaseHp } from './helpers.js';
 
 (async () => {
   // Host creates a lobby with the 'storm' encounter

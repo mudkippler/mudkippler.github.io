@@ -1,3 +1,14 @@
+import {
+    INTERPOLATION_DELAY,
+    USE_MSGPACK_COMPRESSION,
+    PLAYER_RADIUS,
+    PLAYER_BULLET_SPEED,
+    PLAYER_SHOT_COOLDOWN,
+    PLAYER_SPEED_PER_SEC,
+    ORB_RADIUS,
+    ALLY_ALPHA,
+    RECONCILE_SNAP
+} from '/shared/config.js';
 import { draw, triggerScreenExplosion } from './renderer.js';
 import { updateHUD } from './hud.js';
 import { updateLeaderboard } from './leaderboard.js';
@@ -6,10 +17,6 @@ import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } fr
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
 import { MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE, isBlockedByStormUmbrella } from './attacks.js';
 import { MECHANICS, activeMechanics } from './mechanics.js';
-
-const INTERPOLATION_DELAY = 50; // milliseconds
-
-const USE_MSGPACK_COMPRESSION = true; // Must match server setting
 
 let serializer, deserializer;
 
@@ -28,12 +35,6 @@ let socket;
 // players' positions/health and the shared boss health. When our local
 // simulation lands a hit, we report it to the server so boss HP / our health
 // stays authoritative and shared.
-const PLAYER_RADIUS = 10;
-const PLAYER_BULLET_SPEED = 5;
-const PLAYER_SHOT_COOLDOWN = 200; // ms
-const PLAYER_SPEED_PER_SEC = 150; // matches the server's dt-scaled movement speed
-const ORB_RADIUS = 18; // collision/render size for the orb-phase orbs
-const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 
 // The client is authoritative for its own position: movementUpdate reports
 // our predicted position and the server adopts it (with a speed sanity
@@ -41,7 +42,6 @@ const ALLY_ALPHA = 0.75; // ally bullets/damage numbers render slightly faded
 // when we aren't pressing anything. The one exception is a server-side
 // teleport (encounter reset moving everyone back to spawn): if the server's
 // copy is discontinuously far from our prediction, snap to it.
-const RECONCILE_SNAP = 80; // px
 
 // Fallback encounter shape until the server's config lands on join. Each
 // encounter is an ordered list of phases (see server/encounters.js for the

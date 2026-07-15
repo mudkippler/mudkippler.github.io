@@ -1,18 +1,48 @@
-const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
-const path = require('path');
-const msgpack = require('@ygoe/msgpack');
-const { ENCOUNTERS } = require('./encounters');
-const { createPhaseEngine } = require('./phases');
+import express from 'express';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import msgpack from '@ygoe/msgpack';
+import { ENCOUNTERS } from './encounters.js';
+import { createPhaseEngine } from './phases.js';
+let {
+    USE_MSGPACK_COMPRESSION,
+    TICK_RATE,
+    PLAYER_SPEED_PER_SEC,
+    PLAYER_BULLET_SPEED,
+    BULLET_DAMAGE,
+    PLAYER_DAMAGE_BY_SOURCE,
+    WIND_MAX_STRENGTH,
+    UMBRELLA_BLOWN_GUST,
+    DAMAGE_REPORT_MIN_INTERVAL,
+    CHAT_MIN_INTERVAL,
+    CHAT_MAX_LENGTH,
+    SHOT_RELAY_MIN_INTERVAL,
+    REVIVE_RADIUS,
+    REVIVE_TIME,
+    REVIVE_DECAY_MULTIPLIER,
+    REVIVE_HEALTH,
+    TEAM_WIPE_RESET_DELAY,
+    NAME_MAX_LENGTH,
+    GRAVE_LIMIT,
+    LOBBY_MAX_PLAYERS,
+    EMPTY_LOBBY_TTL,
+    PLAYER_COLORS
+} = await import('../shared/config.js');
 
+if (process.env.FAST_TESTS === '1') {
+    TEAM_WIPE_RESET_DELAY = 900;
+}
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
 
-const USE_MSGPACK_COMPRESSION = true; // Set to false to use JSON instead of MessagePack
-
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocketServer({ server });
 
 let serialize, deserialize;
 
@@ -25,6 +55,7 @@ if (USE_MSGPACK_COMPRESSION) {
 }
 
 app.use(express.static(path.join(__dirname, '../public')));
+app.use('/shared', express.static(path.join(__dirname, '../shared')));
 
 const t = (n) => Math.round(n * 10) / 10;
 
@@ -34,69 +65,7 @@ let playerIdCounter = 0;
 // bullets and their collisions are simulated locally on each client. The
 // server is only authoritative for player positions/health and boss health,
 // which is the minimum needed to see other players and share a boss HP pool.
-const TICK_RATE = 20;
-// Movement is scaled by measured elapsed time each tick (see gameLoop), not
-// a fixed per-tick step — setInterval isn't precise under load (multiple
-// lobbies, GC pauses), and a fixed-per-tick step would silently run slower
-// or faster than real time, drifting away from the client's own prediction
-// (which scales by requestAnimationFrame's real dt). That drift is what
-// every other player would see as a desynced position.
-const PLAYER_SPEED_PER_SEC = 150; // matches the client's prediction speed
-const PLAYER_BULLET_SPEED = 5; // matches the client's bullet speed, used to clamp relayed aim vectors
-const BULLET_DAMAGE = 10; // fixed, server-defined so clients can't self-report arbitrary damage
-// Damage per playerDamage report, by source — server-defined so clients can
-// only report *that* a hazard hit them, never how hard. 'ray' and 'dark' are
-// zone damage-over-time ticks (one report per ZONE_TICK_MS of exposure, see
-// mechanics.js), so their per-report numbers read low but repeat.
-const PLAYER_DAMAGE_BY_SOURCE = {
-  bullet: BULLET_DAMAGE,
-  missile: 35, // bombardment explosions hit harder than a regular boss bullet
-  lightning: 25, // storm's lightning strikes, between a regular bullet and a missile
-  star: 25, // twin's exploding stars, telegraphed like lightning
-  ray: 12, // per tick standing in an active sun ray
-  flare: 15, // per tick caught in a solar flare — the moon's shadow doesn't shelter from these
-  laser: 20, // the orb-phase sun half's charged hitscan beam (a single hit when it fires)
-  beam: 18, // per tick in the eclipse's huge corona beam
-  moonbeam: 10, // per tick sliced by a moon-phase moonbeam, even inside the starlight
-  dark: 1 // per tick lost in the moon phase's pitch black
-};
-const WIND_MAX_STRENGTH = 120; // px/sec, storm's strongest gusts (see the wind block in gameLoop)
-const UMBRELLA_BLOWN_GUST = 0.55; // gust fraction (0-1) above which the umbrella is blown away
-const DAMAGE_REPORT_MIN_INTERVAL = 50; // ms, basic anti-spam guard
-const CHAT_MIN_INTERVAL = 500; // ms, basic anti-spam guard
-const CHAT_MAX_LENGTH = 200;
-const SHOT_RELAY_MIN_INTERVAL = 150; // ms, just under the client's fire cooldown
-// Death is permanent within a run: a living teammate must stand on the body
-// for REVIVE_TIME to bring a player back. If everyone is dead the encounter
-// resets after a short pause so the lobby isn't stuck.
-const REVIVE_RADIUS = 30; // px
-const REVIVE_TIME = 3000; // ms of continuous overlap
-// Stepping off the body doesn't instantly forfeit progress — it drains at a
-// fraction of the fill rate, so a brief interruption isn't a full restart.
-const REVIVE_DECAY_MULTIPLIER = 0.4;
-const REVIVE_HEALTH = 50; // revived players come back at half health
-// e2e tests (test/run.js) set FAST_TESTS=1 so a full party wipe doesn't cost
-// every suite a real 4s wait — see the matching bossHp/orbHp/convergeMs
-// scaling in encounters.js. Kept well above revive.test.js's ~500ms "still
-// wiped" checkpoint so the reset doesn't race that assertion.
-const TEAM_WIPE_RESET_DELAY = process.env.FAST_TESTS === '1' ? 900 : 4000; // ms
-const NAME_MAX_LENGTH = 16;
-const GRAVE_LIMIT = 50; // cap so init payload/memory don't grow unbounded
-const LOBBY_MAX_PLAYERS = 10;
-// Grace period before an empty lobby is deleted. Must comfortably exceed the
-// client's respawn reconnect (~1.5s) so a solo player who dies can rejoin
-// their own lobby instead of finding it gone.
-const EMPTY_LOBBY_TTL = 30000; // ms
 
-// 20 hand-picked hues, spread far apart in hue/lightness so adjacent players
-// are easy to tell apart at a glance. Avoids gray (the boss) and violet
-// (the orbs) to keep those readable as distinct entities.
-const PLAYER_COLORS = [
-  '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231',
-  '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990',
-  '#dcbeff', '#9a6324', '#fffac8', '#800000', '#aaffc3',
-  '#ffd8b1', '#ff6347', '#7fffd4', '#ff69b4', '#1e90ff'
-];
 
 const lobbies = {}; // code -> lobby
 
@@ -346,10 +315,7 @@ wss.on('connection', (ws) => {
           ws.send(serialize({ type: 'lobbyError', message: `Lobby ${code} not found.` }));
           return;
         }
-        if (lobby.started) {
-          ws.send(serialize({ type: 'lobbyError', message: `Lobby ${code} already started.` }));
-          return;
-        }
+        
         if (Object.keys(lobby.players).length >= LOBBY_MAX_PLAYERS) {
           ws.send(serialize({ type: 'lobbyError', message: `Lobby ${code} is full.` }));
           return;

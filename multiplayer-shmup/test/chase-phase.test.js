@@ -2,7 +2,7 @@
 // depleting the main boss HP (no-orb encounters) or by clearing both twin
 // orbs together, it gives the boss a fresh HP pool, makes it roam the arena,
 // and has it periodically fire shots aimed at each living player's position.
-const { check, finish, makeClient, sleep, kill, phaseIndex, phaseHp } = require('./helpers');
+import { check, finish, makeClient, sleep, kill, phaseIndex, phaseHp } from './helpers.js';
 
 async function damageBossUntil(client, predicate, maxHits = 220) {
   for (let i = 0; i < maxHits; i++) {

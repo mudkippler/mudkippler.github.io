@@ -1,9 +1,11 @@
-// Runs every *.test.js suite in this directory against a real server
-// instance spun up on a dedicated test port, then tears it down.
-const path = require('path');
-const fs = require('fs');
-const { spawn } = require('child_process');
-const WebSocket = require('ws');
+import path from 'path';
+import fs from 'fs';
+import { spawn } from 'child_process';
+import { WebSocket } from 'ws';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const TEST_PORT = process.env.TEST_PORT || 3100;
 const SERVER_PATH = path.join(__dirname, '..', 'server', 'server.js');
@@ -70,3 +72,4 @@ function runSuite(file) {
   console.log(allPassed ? '\n=== ALL SUITES PASSED ===' : '\n=== SOME SUITES FAILED ===');
   process.exit(allPassed ? 0 : 1);
 })();
+

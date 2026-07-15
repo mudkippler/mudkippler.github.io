@@ -4,7 +4,7 @@
 // on their own screen after all movement keys are released — the old
 // "reconciliation drift" came from the server correcting the client toward
 // its own slightly-lagged simulation.
-const { check, finish, makeClient, sleep } = require('./helpers');
+import { check, finish, makeClient, sleep } from './helpers.js';
 
 (async () => {
   const host = makeClient('host');

@@ -1,32 +1,29 @@
-// Shared helpers for the e2e test suites in this directory. Each suite is a
-// standalone script (run via test/run.js) that speaks the real websocket
-// protocol against a live server instance — no mocking of game logic.
-const WebSocket = require('ws');
-const msgpack = require('@ygoe/msgpack');
+import { WebSocket } from 'ws';
+import msgpack from '@ygoe/msgpack';
 // Default to the scaled-down fight HP/timers (see encounters.js) even when a
 // suite is run directly (node test/foo.test.js) instead of through run.js,
 // which sets this explicitly for the server subprocess too. Must be set
 // before requiring encounters.js, which reads it at module load.
 if (process.env.FAST_TESTS === undefined) process.env.FAST_TESTS = '1';
-const { ENCOUNTERS } = require('../server/encounters');
+import { ENCOUNTERS } from '../server/encounters.js';
 
 const PORT = process.env.TEST_PORT || 3100;
 const URL = `ws://localhost:${PORT}`;
 
 let failures = 0;
 
-function check(cond, label) {
+export function check(cond, label) {
   console.log((cond ? 'PASS' : 'FAIL') + ' - ' + label);
   if (!cond) failures++;
   return cond;
 }
 
-function finish() {
+export function finish() {
   console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
-function makeClient(name) {
+export function makeClient(name) {
   const ws = new WebSocket(URL);
   // bytesReceived mirrors what the in-game diagnostics panel measures on the
   // receive side — the bandwidth test samples it over a window.
@@ -69,13 +66,13 @@ function makeClient(name) {
   return client;
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // The wire's `phase` field is an index into the encounter's phase list —
 // resolve it from the phase's stable id so assertions read as intent
 // ('enrage', 'defeated') instead of magic numbers that shift when a fight
 // gains a phase.
-function phaseIndex(encounterId, phaseId) {
+export function phaseIndex(encounterId, phaseId) {
   const index = ENCOUNTERS[encounterId].phases.findIndex(p => p.id === phaseId);
   if (index === -1) throw new Error(`encounter ${encounterId} has no phase '${phaseId}'`);
   return index;
@@ -85,7 +82,7 @@ function phaseIndex(encounterId, phaseId) {
 // playerCount in server/phases.js) on top of whatever FAST_TESTS scaling
 // encounters.js already applied — reading it from ENCOUNTERS instead of
 // hardcoding the expected number keeps assertions correct under either mode.
-function phaseHp(encounterId, phaseId, playerCount, field = 'bossHp') {
+export function phaseHp(encounterId, phaseId, playerCount, field = 'bossHp') {
   const phase = ENCOUNTERS[encounterId].phases.find(p => p.id === phaseId);
   if (!phase || phase[field] == null) throw new Error(`encounter ${encounterId} phase '${phaseId}' has no ${field}`);
   return phase[field] * playerCount;
@@ -94,7 +91,7 @@ function phaseHp(encounterId, phaseId, playerCount, field = 'bossHp') {
 // Non-HP phase knobs (e.g. convergeMs) that FAST_TESTS may also scale, but
 // which don't scale with headcount the way bossHp/orbHp do — read the raw
 // value instead of hardcoding it so timing-based sleeps stay correct either way.
-function phaseField(encounterId, phaseId, field) {
+export function phaseField(encounterId, phaseId, field) {
   const phase = ENCOUNTERS[encounterId].phases.find(p => p.id === phaseId);
   if (!phase || phase[field] == null) throw new Error(`encounter ${encounterId} phase '${phaseId}' has no ${field}`);
   return phase[field];
@@ -102,7 +99,7 @@ function phaseField(encounterId, phaseId, field) {
 
 // Kill a player by reporting playerDamage 10 times (100 HP / 10 dmg), spaced
 // past the server's 50ms anti-spam window.
-async function kill(client) {
+export async function kill(client) {
   for (let i = 0; i < 10; i++) {
     client.send({ type: 'playerDamage' });
     await sleep(80);
@@ -111,7 +108,7 @@ async function kill(client) {
 
 // Drive `mover` toward `targetId`'s body via movement keys until within
 // close range, then hold still until `until()` is true.
-async function standOn(mover, targetId, until, timeout = 20000) {
+export async function standOn(mover, targetId, until, timeout = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const me = mover.me();
@@ -134,4 +131,3 @@ async function standOn(mover, targetId, until, timeout = 20000) {
   return false;
 }
 
-module.exports = { check, finish, makeClient, sleep, kill, standOn, phaseIndex, phaseHp, phaseField, ENCOUNTERS };

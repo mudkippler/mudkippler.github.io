@@ -4,7 +4,7 @@
 // regressing to the old fixed-per-tick step, which drifted from the client's
 // own real-time prediction under any tick jitter — the root cause of the
 // position desync between players.
-const { check, finish, makeClient, sleep } = require('./helpers');
+import { check, finish, makeClient, sleep } from './helpers.js';
 
 (async () => {
   const host = makeClient('host');

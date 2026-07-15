@@ -1,6 +1,6 @@
 // E2E coverage of: bottom-center spawn positioning, distinct player colors,
 // and gradual (not instant) revive-progress decay.
-const { check, finish, makeClient, sleep, kill } = require('./helpers');
+import { check, finish, makeClient, sleep, kill } from './helpers.js';
 
 (async () => {
   const host = makeClient('host');

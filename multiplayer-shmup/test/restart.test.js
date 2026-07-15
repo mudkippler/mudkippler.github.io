@@ -1,6 +1,6 @@
 // E2E coverage of the post-victory "fight again" flow: only the host can
 // restart, and restarting fully resets the encounter (boss HP, phase, players).
-const { check, finish, makeClient, sleep, phaseIndex, phaseHp } = require('./helpers');
+import { check, finish, makeClient, sleep, phaseIndex, phaseHp } from './helpers.js';
 
 (async () => {
   const host = makeClient('host');

@@ -1,7 +1,7 @@
 // E2E coverage of shot relay, permadeath, stand-on-body revive, and the
 // team-wipe encounter reset.
-const WebSocket = require('ws');
-const { check, finish, makeClient, sleep, kill, standOn } = require('./helpers');
+import { WebSocket } from 'ws';
+import { check, finish, makeClient, sleep, kill, standOn } from './helpers.js';
 
 (async () => {
   const host = makeClient('host');

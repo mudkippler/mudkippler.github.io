@@ -2,7 +2,7 @@
 // boss": only the host can toggle either, pausing freezes the boss/players/
 // damage in place, and restarting mid-fight (not just after victory) can
 // swap in a new encounter and un-pauses automatically.
-const { check, finish, makeClient, sleep, phaseIndex, phaseHp } = require('./helpers');
+import { check, finish, makeClient, sleep, phaseIndex, phaseHp } from './helpers.js';
 
 (async () => {
   const host = makeClient('host');

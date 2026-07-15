@@ -527,4 +527,4 @@ if (process.env.FAST_TESTS === '1') {
   }
 }
 
-module.exports = { ENCOUNTERS };
+export { ENCOUNTERS };

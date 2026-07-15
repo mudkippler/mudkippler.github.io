@@ -4,13 +4,12 @@
 // mechanic) → moon phase (server-seeded stars) → eclipse (converge fraction
 // ramping to totality) → enrage → defeated, plus the zone damage sources
 // ('ray', 'flare', 'dark', 'star') the sun/moon phases report.
-const { check, finish, makeClient, sleep, phaseIndex, phaseHp, phaseField } = require('./helpers');
+import { check, finish, makeClient, sleep, phaseIndex, phaseHp, phaseField } from './helpers.js';
 
 const ORBS = phaseIndex('twin', 'orbs');
 const SUN = phaseIndex('twin', 'sun');
 const MOON = phaseIndex('twin', 'moon');
 const ECLIPSE = phaseIndex('twin', 'eclipse');
-const ENRAGE = phaseIndex('twin', 'enrage');
 const DEFEATED = phaseIndex('twin', 'defeated');
 
 // Both clients spam bossDamage until the lobby state satisfies `predicate`.
@@ -132,11 +131,9 @@ async function depleteUntil(clients, predicate, maxMs = 45000) {
   await sleep(phaseField('twin', 'eclipse', 'convergeMs') + 400); // pad past the converge duration
   check(host.lastState().mech.moonT === 1, `totality reached after the converge duration (moonT=${host.lastState().mech.moonT})`);
 
-  // --- Eclipse → enrage → defeated: the fight still ends like every other ---
-  await depleteUntil([host, friend], s => s.phase === ENRAGE);
-  check(host.lastState().phase === ENRAGE, 'eclipse depletion enters the enrage chase');
+  // --- Eclipse → defeated: the fight still ends like every other ---
   await depleteUntil([host, friend], s => s.phase === DEFEATED);
-  check(host.lastState().phase === DEFEATED, 'enrage depletion defeats the boss');
+  check(host.lastState().phase === DEFEATED, 'eclipse depletion defeats the boss');
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });
