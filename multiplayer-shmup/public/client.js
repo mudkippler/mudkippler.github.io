@@ -16,7 +16,7 @@ import { updateBossBar, getFlairColor, applyBackgroundTheme } from './bossbar.js
 import { showBossDialogue, setBossPortrait, showBossLine, bossPortraitState } from './bossportrait.js';
 import { updateDiagnostics, addReceivedBytes, addSentBytes } from './diagnostics.js';
 import { MISSILE_EXPLOSION_DURATION, MISSILE_DAMAGE, LIGHTNING_STRIKE_MS, LIGHTNING_WIDTH, LIGHTNING_DAMAGE, isBlockedByStormUmbrella } from './attacks.js';
-import { MECHANICS, activeMechanics } from './mechanics.js';
+import { MECHANICS, activeMechanics, BOMBARDMENT_RESUME_DELAY_MS } from './mechanics.js';
 
 let serializer, deserializer;
 
@@ -453,6 +453,12 @@ function connect() {
             // predicting — re-snap instead of drifting/walking there.
             if (newPhaseIndex !== phaseIndex && (encounter.phases[newPhaseIndex] || {}).mechanic === 'maze') {
                 myPos = null;
+            }
+            // Leaving launch codes: hold bombardment's fire for a beat so
+            // the first volley doesn't land the instant everyone's back in
+            // the open (see BOMBARDMENT_RESUME_DELAY_MS in mechanics.js).
+            if (newPhaseIndex !== phaseIndex && phaseDef().mechanic === 'maze') {
+                mechScratch('bombardment').holdFireUntil = performance.now() + BOMBARDMENT_RESUME_DELAY_MS;
             }
             // Any transition back to the opening phase means the encounter
             // was reset (mid-fight restart, post-victory restart, or an

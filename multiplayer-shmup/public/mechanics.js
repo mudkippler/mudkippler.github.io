@@ -65,6 +65,11 @@ export function activeMechanics(def) {
 // amounts above.
 const ZONE_TICK_MS = 500;
 
+// How long bombardment holds its fire after players return from launch
+// codes (see the bombardment mechanic's holdFireUntil check and its stamp
+// in client.js's phase-transition handling).
+export const BOMBARDMENT_RESUME_DELAY_MS = 2000;
+
 // Shared attack cadence: true (and stamps the timer) once params.attackRate
 // ms have passed since this mechanic last fired.
 function fireReady(ctx) {
@@ -324,6 +329,11 @@ export const MECHANICS = {
     // which is exactly the lifetime the ratchet needs.)
     bombardment: {
         update(ctx) {
+            // Coming back from launch codes: client.js stamps holdFireUntil
+            // on the way out of the maze phase so the first volley doesn't
+            // land the instant players are dropped back into the open —
+            // they get BOMBARDMENT_RESUME_DELAY_MS to get their bearings.
+            if (ctx.state.holdFireUntil && ctx.now < ctx.state.holdFireUntil) return;
             if (!fireReady(ctx)) return;
             const hpFraction = ctx.boss.hp / (ctx.boss.maxHp || 1);
             ctx.state.missileBonus = Math.max(ctx.state.missileBonus || 0, Math.floor((1 - hpFraction) / 0.15));
