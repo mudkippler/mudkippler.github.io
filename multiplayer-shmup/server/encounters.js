@@ -4,6 +4,12 @@
 // publicEncounter in server.js) so they drive their local attack simulation
 // (public/mechanics.js) and UI from the same data the server runs.
 //
+// Encounter-level fields (siblings of `phases`):
+//   bossRadius       boss body/hitbox radius in px; omit to use
+//                    DEFAULT_BOSS_RADIUS. The sprite's drawn size and the
+//                    client-side bullet hit check both derive from the same
+//                    value, so a bigger boss is also a bigger target.
+//
 // Phase fields:
 //   id               stable key — HP-taunt tracking and tests reference
 //                    phases by id, never by index
@@ -65,6 +71,10 @@ const DEFEATED = {
 // The standard enrage entry line for bosses whose main phase feeds straight
 // into the chase; twin overrides it since its enrage follows the orb phase.
 const ENRAGE_ENTER = "you think that's the end of me?!";
+
+// Default boss body/hitbox radius (px); an encounter overrides it with its
+// own bossRadius field (see the encounter-level fields comment above).
+export const DEFAULT_BOSS_RADIUS = 30;
 
 // Attack params shared by an encounter's main and enrage phases — the enrage
 // chase keeps firing the boss's signature pattern from wherever it roams.
@@ -433,10 +443,11 @@ const ENCOUNTERS = {
 
   bombardment: {
     id: 'bombardment', name: 'Bombardment',
+    bossRadius: DEFAULT_BOSS_RADIUS * 2, // a hulking silo platform, twice the standard body/hitbox
     phases: [
       {
         id: 'main',
-        bossHp: 100, bossDamageable: true,
+        bossHp: 2000, bossDamageable: true,
         behavior: 'stationary',
         mechanic: 'bombardment', params: BOMBARDMENT_VOLLEYS,
         transition: 'bossHpZero',
@@ -477,7 +488,7 @@ const ENCOUNTERS = {
         // other encounter gets is redundant here (waypointChase skips firing
         // it when this is falsy).
         ...ENRAGE_BASE,
-        bossHp: 600, chaseSpeed: 85,
+        bossHp: 800, chaseSpeed: 85,
         mechanic: 'bombardment', params: BOMBARDMENT_VOLLEYS,
         say: {
           intensity: 3,

@@ -5,9 +5,11 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
 // Boss body sprites: drop img/<encounterId>[_<state>]_sprite.png into public/img
-// (same state names as the portrait convention in bossportrait.js — 'sun',
-// 'moon', 'eclipse', ...) and it's drawn in place of the plain circle body.
-// A missing file just falls back to the circle instead of a broken image.
+// (same state names as the portrait convention in bossportrait.js — 'injured',
+// 'enraged', 'sun', 'moon', ...) and it's drawn in place of the plain circle
+// body. A state with no sprite of its own falls back to the encounter's base
+// sprite, so a single <encounterId>_sprite.png covers the whole fight; only
+// if that's missing too does the boss fall back to the circle.
 const bossSpriteCache = {};
 function bossSpriteFor(encounterId, state) {
     if (!encounterId) return null;
@@ -21,7 +23,9 @@ function bossSpriteFor(encounterId, state) {
         img.src = src;
         bossSpriteCache[src] = entry;
     }
-    return entry.ready ? entry.img : null;
+    if (entry.ready) return entry.img;
+    if (entry.failed && state && state !== 'base') return bossSpriteFor(encounterId, 'base');
+    return null;
 }
 
 // Small tombstone icon marking a resurrectable (currently-dead) player.
@@ -640,6 +644,145 @@ function drawEclipse(view, entry, boss, encounterId, bossState) {
 }
 
 // --- Bombardment's launchCodes mechanic ------------------------------------
+// A klaxon-style rotating beacon hangs at top center for the whole phase:
+// two opposed red beams sweep the play area (translucent, so they read as
+// light cast over the mazes rather than a solid object), and the dome
+// flashes in sync with the sweep. Purely cosmetic, driven off the local
+// clock — nothing is sent over the wire for it.
+const WARNING_LIGHT_Y = 11; // px, the bulb's center below the top edge
+const WARNING_SPIN_PERIOD_MS = 2200; // one full beam rotation
+const WARNING_BEAM_HALF_ANGLE = 0.22; // rad, half-width of each swept beam
+const WARNING_BEAM_LENGTH = 1000; // px, past the far corners of the canvas
+
+function drawWarningLight() {
+    const cx = canvas.width / 2 + 40;
+    const cy = WARNING_LIGHT_Y;
+    const angle = (performance.now() % WARNING_SPIN_PERIOD_MS) / WARNING_SPIN_PERIOD_MS * Math.PI * 2;
+
+    // Two opposed beams, like a real rotating beacon, fading with distance.
+    const beam = ctx.createRadialGradient(cx, cy, 0, cx, cy, WARNING_BEAM_LENGTH);
+    beam.addColorStop(0, 'rgba(255, 40, 40, 0.4)');
+    beam.addColorStop(1, 'rgba(255, 40, 40, 0)');
+    ctx.fillStyle = beam;
+    for (const a of [angle, angle + Math.PI]) {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, WARNING_BEAM_LENGTH, a - WARNING_BEAM_HALF_ANGLE, a + WARNING_BEAM_HALF_ANGLE);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // Ambient halo around the bulb, brightest when a beam sweeps past
+    // straight down/up so the flash tracks the rotation.
+    const flash = Math.abs(Math.sin(angle));
+    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 55);
+    halo.addColorStop(0, `rgba(255, 60, 60, ${0.25 + 0.3 * flash})`);
+    halo.addColorStop(1, 'rgba(255, 60, 60, 0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(cx - 55, cy - 55, 110, 110);
+
+    // The fixture itself: a mount bar along the top edge with a red dome
+    // hanging under it, glowing with the same flash as the halo.
+    ctx.fillStyle = '#444';
+    ctx.fillRect(cx - 14, 0, 28, 4);
+    ctx.fillStyle = `rgb(${140 + Math.round(115 * flash)}, 25, 25)`;
+    ctx.beginPath();
+    ctx.arc(cx, 4, 8, 0, Math.PI);
+    ctx.closePath();
+    ctx.fill();
+}
+
+// Decorative nuclear stockpile framing the mazes: the strips left and right
+// of MAZE_AREA (see mazeSlots in server/phases.js) are dead space during
+// launch codes, so warhead silhouettes stand in them, nose-up on launch
+// rails, their tip lights blinking in sync with the beacon overhead.
+const NUKE_MARGIN_X = 30; // px, center of the left margin strip (mirrored on the right)
+const NUKE_ROW_YS = [170, 310, 450]; // px, warhead centers down each margin
+const NUKE_HEIGHT = 80; // px, whole silhouette including fins
+
+// Standard radiation trefoil: yellow disc, three black blades + center dot.
+function drawTrefoil(x, y, r) {
+    ctx.fillStyle = '#ffd60a';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#181818';
+    for (let i = 0; i < 3; i++) {
+        const a = -Math.PI / 2 + i * (Math.PI * 2 / 3);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, r * 0.9, a - Math.PI / 6, a + Math.PI / 6);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.fillStyle = '#ffd60a';
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#181818';
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// One nose-up warhead centered at (x, y): rounded nose over a tapering body,
+// three tail fins, a hazard band, a trefoil, and a blinking tip light.
+function drawNuke(x, y, h, flash) {
+    const w = h * 0.3;
+    const r = w / 2;
+    ctx.save();
+    ctx.translate(x, y);
+
+    const noseY = -h / 2 + r; // center of the nose semicircle
+    const tailY = h * 0.28; // where the body ends and the fins take over
+
+    // Side fins plus a stubby center fin facing the viewer.
+    ctx.fillStyle = '#4a5240';
+    for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(side * r, tailY - h * 0.14);
+        ctx.lineTo(side * (r + w * 0.5), tailY + h * 0.2);
+        ctx.lineTo(side * r, tailY + h * 0.2);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.fillRect(-w * 0.15, tailY, w * 0.3, h * 0.2);
+
+    // Body: semicircular nose flowing into a slightly tapered casing.
+    ctx.fillStyle = '#6d7a52';
+    ctx.strokeStyle = '#2f3327';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, noseY, r, Math.PI, 0);
+    ctx.lineTo(r * 0.8, tailY);
+    ctx.lineTo(-r * 0.8, tailY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Hazard band just under the nose, trefoil on the casing's belly.
+    ctx.fillStyle = '#c9a227';
+    ctx.fillRect(-r * 0.95, noseY + r * 0.7, r * 1.9, h * 0.06);
+    drawTrefoil(0, h * 0.05, r * 0.55);
+
+    // Tip light, blinking with the same clock as the warning beacon.
+    ctx.fillStyle = `rgba(255, 60, 60, ${0.25 + 0.75 * flash})`;
+    ctx.beginPath();
+    ctx.arc(0, -h / 2 + 1.5, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function drawMarginNukes() {
+    const angle = (performance.now() % WARNING_SPIN_PERIOD_MS) / WARNING_SPIN_PERIOD_MS * Math.PI * 2;
+    const flash = Math.abs(Math.sin(angle));
+    for (const y of NUKE_ROW_YS) {
+        drawNuke(NUKE_MARGIN_X, y, NUKE_HEIGHT, flash);
+        drawNuke(canvas.width - NUKE_MARGIN_X, y, NUKE_HEIGHT, flash);
+    }
+}
+
 // Each player's maze occupies its own slice of the shared 800x600 canvas
 // (see mazeSlots in server/phases.js), so ships/collisions need no special
 // coordinate handling — the maze is just terrain that happens to be lethal.
@@ -676,19 +819,22 @@ function drawMazes(view, myId) {
     }
     ctx.globalAlpha = 1;
 
+    drawMarginNukes();
+    drawWarningLight();
+
     if (mech && mech.mazeGraceLeft != null) {
         // Grace countdown: a big center-screen number so it reads instantly
         // even mid-panic, counting down to the moment walls turn lethal.
         ctx.textAlign = 'center';
-        ctx.font = 'bold 64px impact';
+        ctx.font = 'bold 64px courier';
         ctx.fillStyle = '#ffdd55';
         ctx.fillText(Math.ceil(mech.mazeGraceLeft / 1000).toString(), canvas.width / 2, canvas.height / 2 - 40);
-        ctx.font = 'bold 20px impact';
+        ctx.font = '20px courier';
         ctx.fillStyle = '#ffffff';
         ctx.fillText('DEFUSE THE BOMB!', canvas.width / 2, canvas.height / 2);
         ctx.textAlign = 'left';
     } else if (mech && mech.mazeTimeLeft != null) {
-        ctx.font = 'bold 28px impact';
+        ctx.font = '28px courier';
         ctx.textAlign = 'center';
         ctx.fillStyle = mech.mazeTimeLeft < 5000 ? '#ff5555' : '#ffffff';
         ctx.fillText(`${(mech.mazeTimeLeft / 1000).toFixed(1)}s`, canvas.width / 2, 30);
@@ -887,28 +1033,35 @@ export function draw(myId, players, bullets, allyBullets, bossBullets, bossMissi
     // Old permanent grave markers are hidden for now — death is revivable,
     // so a gravestone is drawn at each currently-dead player instead (below).
 
+    // During launchCodes' mazes the boss has "left the field" — hiding its
+    // body (and the floating health bar that would otherwise hover over
+    // nothing) keeps every eye on the mazes.
+    const mazeActive = !!(mechView && mechView.mechanics && mechView.mechanics.some(e => e.name === 'maze'));
+
     // Boss — a sprite (see bossSpriteFor) is drawn if one exists for this
     // encounter/state, otherwise it falls back to a plain circle tinted by
     // the phase (e.g. red during the enrage chase, as a readable signal that
     // it's now mobile and firing aimed shots).
-    const bossSprite = bossSpriteFor(encounterId, bossState);
-    if (bossSprite) {
-        const size = boss.radius * 2;
-        ctx.drawImage(bossSprite, boss.x - boss.radius, boss.y - boss.radius, size, size);
-    } else {
-        ctx.fillStyle = (phaseDef && phaseDef.bossTint) || 'gray';
-        ctx.beginPath();
-        ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
-        ctx.fill();
-    }
+    if (!mazeActive) {
+        const bossSprite = bossSpriteFor(encounterId, bossState);
+        if (bossSprite) {
+            const size = boss.radius * 2;
+            ctx.drawImage(bossSprite, boss.x - boss.radius, boss.y - boss.radius, size, size);
+        } else {
+            ctx.fillStyle = (phaseDef && phaseDef.bossTint) || 'gray';
+            ctx.beginPath();
+            ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
 
-    // Boss health bar
-    if (boss.maxHp) {
-        const bossHealthPct = Math.max(0, boss.hp / boss.maxHp);
-        ctx.fillStyle = `hsl(${bossHealthPct * 120}, 100%, 50%)`;
-        ctx.fillRect(boss.x - boss.radius, boss.y - boss.radius - 15, boss.radius * 2 * bossHealthPct, 6);
-        ctx.strokeStyle = 'black';
-        ctx.strokeRect(boss.x - boss.radius, boss.y - boss.radius - 15, boss.radius * 2, 6);
+        // Boss health bar
+        if (boss.maxHp) {
+            const bossHealthPct = Math.max(0, boss.hp / boss.maxHp);
+            ctx.fillStyle = `hsl(${bossHealthPct * 120}, 100%, 50%)`;
+            ctx.fillRect(boss.x - boss.radius, boss.y - boss.radius - 15, boss.radius * 2 * bossHealthPct, 6);
+            ctx.strokeStyle = 'black';
+            ctx.strokeRect(boss.x - boss.radius, boss.y - boss.radius - 15, boss.radius * 2, 6);
+        }
     }
 
     // Twin orbs (orb-phase co-op targets); dead orbs linger as faded husks so

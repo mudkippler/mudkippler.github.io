@@ -4,7 +4,7 @@ import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import msgpack from '@ygoe/msgpack';
-import { ENCOUNTERS } from './encounters.js';
+import { ENCOUNTERS, DEFAULT_BOSS_RADIUS } from './encounters.js';
 import { createPhaseEngine } from './phases.js';
 let {
     USE_MSGPACK_COMPRESSION,
@@ -111,7 +111,7 @@ function createLobby(encounterId) {
     emptyAt: null,
     wipeAt: null, // set when every player is dead; encounter resets shortly after
     players: {},
-    boss: { x: 400, y: 100, radius: 30, hp: encounter.phases[0].bossHp, maxHp: encounter.phases[0].bossHp },
+    boss: { x: 400, y: 100, radius: encounter.bossRadius || DEFAULT_BOSS_RADIUS, hp: encounter.phases[0].bossHp, maxHp: encounter.phases[0].bossHp },
     phaseIndex: 0, // index into encounter.phases; the phase def is authoritative for what's damageable/active
     phaseState: {}, // per-phase scratch for the phase's server behavior (see phases.js)
     mech: null, // per-tick mechanic values some behaviors broadcast (ray angle, moon position, ...)
