@@ -221,6 +221,24 @@ function sanitizeName(raw) {
   return name || 'anon';
 }
 
+// Names are just a display label — players are identified internally by id
+// — but showing the same name twice is confusing, so anyone sharing a name
+// with another player gets renamed to 'copycat' once the fight starts.
+function resolveCopycatNames(lobby) {
+  const counts = {};
+  for (const id in lobby.players) {
+    const name = lobby.players[id].name;
+    counts[name] = (counts[name] || 0) + 1;
+  }
+  for (const id in lobby.players) {
+    const player = lobby.players[id];
+    if (counts[player.name] > 1) {
+      player.name = 'copycat';
+      if (lobby.damageLog[id]) lobby.damageLog[id].name = 'copycat';
+    }
+  }
+}
+
 function joinLobby(ws, lobby, rawName) {
   const id = playerIdCounter;
   playerIdCounter++;
@@ -258,6 +276,10 @@ function joinLobby(ws, lobby, rawName) {
   lobby.damageLog[id] = { name: player.name, color: player.color, dmg: 0 };
   lobby.emptyAt = null;
   if (lobby.hostId === null) lobby.hostId = id;
+
+  // A late joiner into an already-running fight skips the startGame rename,
+  // so re-check here too in case their name collides with someone already in.
+  if (lobby.started) resolveCopycatNames(lobby);
 
   ws.id = id;
   ws.lobbyCode = lobby.code;
@@ -338,6 +360,7 @@ wss.on('connection', (ws) => {
       if (data.type === 'startGame') {
         if (ws.id !== lobby.hostId || lobby.started) return;
         lobby.started = true;
+        resolveCopycatNames(lobby);
         broadcastLobbyState(lobby);
         lobbyBroadcast(lobby, serialize({ type: 'gameStart' }));
         // Re-enter the opening phase: createLobby sized boss HP assuming just

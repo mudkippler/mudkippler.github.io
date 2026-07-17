@@ -201,7 +201,7 @@ function fireLine(missiles, now, missileCount, arena) {
     }
 }
 
-export function bombardmentAttack(missiles, now, missileCount, lineCount, arena = { xMin: 80, xMax: 720, yMin: 60, yMax: 540 }) {
+export function bombardmentAttack(missiles, now, missileCount, lineCount, arena = { xMin: 0, xMax: 800, yMin: 0, yMax: 600 }) {
     for (let line = 0; line < lineCount; line++) {
         fireLine(missiles, now, missileCount, arena);
     }
