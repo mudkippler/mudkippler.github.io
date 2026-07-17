@@ -359,7 +359,11 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
     launchCodes: {
       onEnter(lobby, def) {
         const state = lobby.phaseState;
-        state.startedAt = Date.now();
+        // The maze clock and wall collisions don't start until the grace
+        // period ends (state.startedAt stays null until then) — players get
+        // def.graceMs to see their layout before it turns lethal.
+        state.graceUntil = Date.now() + (def.graceMs || 0);
+        state.startedAt = null;
         state.reached = new Set();
         state.resolved = false;
 
@@ -396,6 +400,12 @@ function createPhaseEngine({ say, emit, t, killPlayer }) {
       update(lobby, def, now) {
         const state = lobby.phaseState;
         if (state.resolved) return;
+
+        if (now < state.graceUntil) {
+          lobby.mech = { mazeGraceLeft: state.graceUntil - now };
+          return; // walls aren't lethal yet and the clock hasn't started
+        }
+        if (state.startedAt === null) state.startedAt = now;
 
         for (const id of state.trackedIds) {
           const p = lobby.players[id];

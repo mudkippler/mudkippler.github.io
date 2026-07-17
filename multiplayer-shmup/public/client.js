@@ -946,6 +946,11 @@ function updateLocalCombat(now, myPos, alive) {
 
 function updateLocalMovement(dt) {
     if (!myPos) return;
+    // Launch codes' grace period (mech.mazeGraceLeft, see the launchCodes
+    // behavior in server/phases.js): walls aren't lethal yet, but movement
+    // is held too so everyone actually looks at their maze during the
+    // countdown instead of already being underway.
+    if (mech && mech.mazeGraceLeft != null) return;
 
     let vx = 0, vy = 0;
     if (movementKeys['ArrowUp']) vy -= 1;

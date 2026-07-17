@@ -2,6 +2,8 @@ You will only be working inside of /multiplayer-shmup for the time being
 
 This repository contains the code for a game written in HTML, CSS, and Javascript.
 
+Utilize the manual.md markdown document as a directory, and feel free to add to it when you run into something that isn't clear.
+
 The premise of the game is a shoot-em-up style top down shooter like touhou, but multiplayer using websockets.
 
 When implementing anything that gets sent over a websocket, make sure you are optimizing for bandwidth to the best of your ability.

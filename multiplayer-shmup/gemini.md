@@ -7,3 +7,7 @@ When implementing anything that gets sent over a websocket, make sure you are op
 Make the code and functions you create human-readable, favoring ease of understanding over clever complexity. Complexity is only justified for performance gain or where the nature of the problem demands it.
 
 Build things modularly where appropriate, moving values into constants rather than hard coding them. Think things like TICK_RATE, BULLET_SPEED, PLAYER_SPEED.
+
+when writing tests, emphasize making them fast. add debug flags to the game if you need to that expedite the game, either by lowering boss health or by accelerating the game tick rate.
+
+Utilize the manual.md markdown document, and feel free to add to it when you run into something that isn't clear.

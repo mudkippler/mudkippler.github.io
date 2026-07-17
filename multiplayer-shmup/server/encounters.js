@@ -456,16 +456,18 @@ const ENCOUNTERS = {
         // screen. Walls are lethal on contact, and the whole team has
         // def.timeLimit ms to clear their maze together — running out with
         // anyone still inside kills the whole party, not just the laggards.
+        // def.graceMs gives everyone a breather to see their maze's layout
+        // before walls turn lethal and the clock starts.
         id: 'launchCodes',
         bossDamageable: false,
         behavior: 'launchCodes',
-        gridSize: 6, timeLimit: 15000,
+        gridSize: 6, timeLimit: 15000, graceMs: 3000,
         mechanic: 'maze', params: {},
         transition: 'mazeCleared',
         subtitle: 'Launch codes incoming — clear your maze before time runs out',
         say: {
           intensity: 2,
-          enter: ['Authenticating launch codes. Navigate the grid or be purged.'],
+          enter: ['Authenticating launch codes. Coordinates lock in three seconds — memorize your grid.'],
           timeout: ['Authentication failed. Purging.']
         }
       },
@@ -523,6 +525,7 @@ if (process.env.FAST_TESTS === '1') {
       if ('bossHp' in phase) phase.bossHp = Math.max(MIN_PHASE_HP, Math.round(phase.bossHp * HP_SCALE));
       if ('orbHp' in phase) phase.orbHp = Math.max(10, Math.round(phase.orbHp * HP_SCALE));
       if ('convergeMs' in phase) phase.convergeMs = Math.round(phase.convergeMs * TIME_SCALE);
+      if ('graceMs' in phase) phase.graceMs = Math.round((phase.graceMs ?? 0) * TIME_SCALE);
     }
   }
 }

@@ -1,7 +1,8 @@
 // E2E coverage of bombardment's "launch codes" phase: each player gets their
 // own maze (see the launchCodes behavior in server/phases.js), touching a
-// wall kills instantly, and reaching the exit clears the phase.
-import { check, finish, makeClient, sleep, phaseIndex } from './helpers.js';
+// wall kills once the entry grace period ends, and reaching the exit clears
+// the phase.
+import { check, finish, makeClient, sleep, phaseIndex, phaseField } from './helpers.js';
 
 async function damageBossUntil(client, predicate, maxHits = 550) {
   for (let i = 0; i < maxHits; i++) {
@@ -134,7 +135,7 @@ function solvePath(graph) {
   const cleared = host.lastState();
   check(cleared.phase === phaseIndex('bombardment', 'enrage'), `reaching the exit advances past launch codes (phase was ${cleared.phase})`);
 
-  // --- Touching a wall kills instantly ---
+  // --- Touching a wall kills once the entry grace period ends ---
   const host2 = makeClient('host2');
   await host2.open;
   host2.send({ type: 'createLobby', name: 'Bob', encounter: 'bombardment' });
@@ -149,10 +150,15 @@ function solvePath(graph) {
   const layout2 = await host2.waitFor('mazeLayout');
   const maze2 = layout2.mazes[host2.id];
 
+  // Walls aren't lethal during the entry grace period (see graceMs in the
+  // launchCodes phase def) — sitting on one there is expected to be safe,
+  // so wait it out before checking that the wall actually kills.
+  await sleep(phaseField('bombardment', 'launchCodes', 'graceMs') + 200);
+
   // The start cell's own top boundary wall is always present in every maze —
   // no BFS needed to find a guaranteed wall to walk into.
   const result = await moveToward(host2, maze2.start.x, maze2.start.y - maze2.cellSize / 2);
-  check(result === 'dead', `touching a maze wall kills the player (got "${result}")`);
+  check(result === 'dead', `touching a maze wall kills the player after the grace period (got "${result}")`);
 
   finish();
 })().catch(e => { console.error('TEST ERROR:', e.message); process.exit(1); });

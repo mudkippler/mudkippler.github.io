@@ -676,7 +676,18 @@ function drawMazes(view, myId) {
     }
     ctx.globalAlpha = 1;
 
-    if (mech && mech.mazeTimeLeft != null) {
+    if (mech && mech.mazeGraceLeft != null) {
+        // Grace countdown: a big center-screen number so it reads instantly
+        // even mid-panic, counting down to the moment walls turn lethal.
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 64px impact';
+        ctx.fillStyle = '#ffdd55';
+        ctx.fillText(Math.ceil(mech.mazeGraceLeft / 1000).toString(), canvas.width / 2, canvas.height / 2 - 40);
+        ctx.font = 'bold 20px impact';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('DEFUSE THE BOMB', canvas.width / 2, canvas.height / 2);
+        ctx.textAlign = 'left';
+    } else if (mech && mech.mazeTimeLeft != null) {
         ctx.font = 'bold 28px impact';
         ctx.textAlign = 'center';
         ctx.fillStyle = mech.mazeTimeLeft < 5000 ? '#ff5555' : '#ffffff';
