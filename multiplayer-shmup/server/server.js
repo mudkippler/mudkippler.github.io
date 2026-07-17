@@ -382,7 +382,8 @@ wss.on('connection', (ws) => {
           // Storm's wind can push a player well beyond their own top speed —
           // give the cap extra slack matching the wind's max strength so a
           // legitimate gust-blown report doesn't get rejected as a teleport.
-          const windSlack = phases.currentPhase(lobby).wind ? WIND_MAX_STRENGTH * elapsed * 1.5 : 0;
+          const currentPhase = phases.currentPhase(lobby);
+          const windSlack = currentPhase && currentPhase.wind ? WIND_MAX_STRENGTH * elapsed * 1.5 : 0;
           const maxDist = PLAYER_SPEED_PER_SEC * elapsed * 1.5 + 2 + windSlack;
           const nx = Math.max(0, Math.min(800, data.x));
           const ny = Math.max(0, Math.min(600, data.y));
