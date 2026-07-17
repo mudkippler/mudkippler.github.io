@@ -685,7 +685,7 @@ function drawMazes(view, myId) {
         ctx.fillText(Math.ceil(mech.mazeGraceLeft / 1000).toString(), canvas.width / 2, canvas.height / 2 - 40);
         ctx.font = 'bold 20px impact';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('DEFUSE THE BOMB', canvas.width / 2, canvas.height / 2);
+        ctx.fillText('DEFUSE THE BOMB!', canvas.width / 2, canvas.height / 2);
         ctx.textAlign = 'left';
     } else if (mech && mech.mazeTimeLeft != null) {
         ctx.font = 'bold 28px impact';
